@@ -28,7 +28,7 @@
 ## 相关资源
 知乎minibt量化教程专栏：[https://zhuanlan.zhihu.com/column/c_1942555756558783128](https://zhuanlan.zhihu.com/column/c_1942555756558783128)
 
-minibt量化教程：[http://www.minibt.cn](http://www.minibt.cn) 或 [https://www.minibt.cn](https://www.minibt.cn)
+minibt量化教程：[https://www.minibt.cn](https://www.minibt.cn)
 
 github仓库：[https://github.com/MiniBtMaster/minibt](https://github.com/MiniBtMaster/minibt)
 

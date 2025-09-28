@@ -143,6 +143,7 @@ print(minibt.__version__)
 
 ## 五、网站教程
 知乎minibt量化交易专栏：`https://zhuanlan.zhihu.com/column/c_1942555756558783128`
+
 minibt量化交易教程：`www.minibt.cn`
 
 # minibt示例代码

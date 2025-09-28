@@ -25,7 +25,16 @@
 
 &emsp;&emsp;minibt，让量化交易的门槛更低、效率更高，无论是快速验证想法还是部署实盘策略，都是你的得力助手。
 
-# minibt 安装教程
+## 相关资源
+知乎minibt量化教程专栏：[https://zhuanlan.zhihu.com/column/c_1942555756558783128](https://zhuanlan.zhihu.com/column/c_1942555756558783128)
+
+minibt量化教程：[https://www.minibt.cn](https://www.minibt.cn)
+
+github仓库：[https://github.com/MiniBtMaster/minibt](https://github.com/MiniBtMaster/minibt)
+
+pypi仓库：[https://pypi.org/project/minibt/](https://pypi.org/project/minibt/)
+
+# minibt 安装
 
 ## 一、环境要求
 
@@ -53,55 +62,13 @@ pip install minibt
 
 该命令会自动拉取 minibt 及其基础依赖（如 `numpy`、`pandas` 等 ），但部分特殊依赖（如 `TA-Lib` 需额外系统级依赖 ）需手动处理。
 
-
-
-1.  **补充特殊依赖**
-
-*   **TA-Lib**：
-
-    TA-Lib 依赖系统级库，需先安装对应依赖再装 Python 包：
-
-
-    *   **Windows**：
-
-        从 [TA-Lib 官网](https://www.ta-lib.org/hdr_dll.html) 下载对应系统版本的 `ta_libc_cdr.dll` 等文件，放置到 Python 安装目录下的 `Lib\site-packages` ，或系统 `System32` 路径；然后执行：
-
-
-
-```python
-pip install ta-lib
-```
-
-
-*   **实盘对接（TQ 相关 ）**：
-
-    若需对接 TQ 实盘，执行：
-
-
-
-```python
-pip install tqsdk
-```
-
-
-
-*   **可视化 UI 依赖**：
-
-    若使用 `miniqt` 可视化界面，执行：
-
-
-
-```python
-pip install PyQt5 qfluentwidgets
-```
-
 ### （二）从源码安装（适合开发 / 定制）
 
 
 
 1.  **克隆源码**
 
-    从项目仓库（示例地址 `https://github.com/MiniBtMaster/minibt` ，需替换为实际仓库 ）克隆代码，安装minibt的whl文件
+    从github项目仓库（`https://github.com/MiniBtMaster/minibt` ）或pypi仓库（`https://pypi.org/project/minibt`）下载安装minibt的whl文件
 
 
 
@@ -122,29 +89,7 @@ import minibt
 print(minibt.__version__)
 ```
 
-若输出 `1.0.0`（或对应版本号 ），且无导入错误，说明安装成功。
-
-## 四、常见问题
-
-
-
-1.  **TA-Lib 导入报错**：
-
-    确保按步骤安装了系统级依赖和 Python 包，若仍报错，检查 `ta-lib` 版本与系统兼容性，或尝试重新安装。
-
-2.  **PyQt5 相关错误**：
-
-    确认安装命令执行成功，若有 `QtCore` 等导入错误，尝试重新安装 `PyQt5`（`pip uninstall PyQt5 && pip install PyQt5` ）。
-
-3.  **实盘对接问题**：
-
-    使用 `tqsdk` 时，需正确配置 TQ 账号认证信息，若报错 “网络连接失败”，检查网络及 TQ 服务器状态。
-
-
-## 五、网站教程
-知乎minibt量化交易专栏：`https://zhuanlan.zhihu.com/column/c_1942555756558783128`
-
-minibt量化交易教程：`www.minibt.cn`
+若输出 `1.0.4`（或对应版本号 ），且无导入错误，说明安装成功。
 
 # minibt示例代码
 

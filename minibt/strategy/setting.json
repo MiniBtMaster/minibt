@@ -1,0 +1,14 @@
+{
+    "drawings": {},
+    "price_alerts": {},
+    "istool": false,
+    "mouse_label_color": "rgba(68, 255, 109, 255)",
+    "candlestick_colors": {
+        "bear_color": "rgba(200, 97, 100, 100)",
+        "bull_color": "rgba(39, 157, 130, 100)"
+    },
+    "splitter_sizes": [
+        150,
+        893
+    ]
+}

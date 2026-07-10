@@ -1,0 +1,3 @@
+class SupportResistance:
+    """支撑阻力指标"""
+    ...

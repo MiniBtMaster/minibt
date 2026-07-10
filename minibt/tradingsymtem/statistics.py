@@ -1,0 +1,3 @@
+class Statistics:
+    """统计指标"""
+    ...

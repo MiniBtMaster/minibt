@@ -1,0 +1,3 @@
+class Momentum:
+    """动量指标"""
+    ...

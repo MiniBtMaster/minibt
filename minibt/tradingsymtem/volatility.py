@@ -1,0 +1,3 @@
+class Volatility:
+    """波动率指标"""
+    ...

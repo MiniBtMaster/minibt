@@ -234,7 +234,7 @@ bt.run()                                   # 模式一：LightChart 实时图表
 ```python
 class RLStrategy(Strategy):
     rl = True  # 开启强化学习
-    def start(self):
+    def __init__(self):
         # 初始化指标特征
         ...
         # 配置强化学习模型
@@ -243,6 +243,10 @@ class RLStrategy(Strategy):
             train=True, break_step=1e6, state_dim=..., action_dim=...,
             auto_process_features=True,        # 自动处理指标特征
         )
+
+    def reset(self):
+        # 重置强化学习模型
+        ...
     
     def step(self):
         # 训练和测试强化学习模型

@@ -1,0 +1,128 @@
+#python -m build --wheel
+#使用以下命令安装whl文件：python -m pip install 文件名.whl
+[build-system]
+# 方案 A：构建时现场编译 Cython 扩展，因此需要 Cython 与 numpy
+requires = ["setuptools>=77", "Cython>=3.0", "numpy>=2.2.6"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minibt"
+version = "1.2.8"
+description = "一站式量化交易策略开发库，简化从策略搭建到实盘交易的全流程"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["quant", "trading", "backtest", "strategy", "indicator", "futures", "tqsdk"]
+authors = [
+    { name = "owen", email = "407841129@qq.com" }
+]
+urls = {Homepage = "https://github.com/MiniBtMaster/minibt",Documentation = "https://www.minibt.cn/"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Office/Business :: Financial :: Investment"
+]
+# ===========================================================================
+# 依赖：默认安装即为全功能（策略 / 指标 / 回测 / 看图 / 参数优化 / 统计报告 /
+# 实盘 / 强化学习 / 因子分析）。
+# 注意：所有重依赖都是“按需惰性 import”，因此安装体积虽大，
+# 但 `import minibt` 仍保持 ~1.2s 的快速启动。
+# ===========================================================================
+dependencies = [
+    # 基础数据处理库
+    "numpy>=2.2.6",
+    "pandas>=2.2.0,<=2.3.3",
+    "pandas-ta>=0.3.14b0",
+    "numpy-ext>=0.9.9",       # ta.py 运行时必需
+    "numba>=0.60",            # pandas_ta 与 @stop_callback 均需要
+    # 量化指标与分析库
+    "TA-Lib>=0.4.24",
+    "finta>=1.3",
+    "scipy>=1.7.0",
+    "tulipy>=0.4.0",
+    # 统计报告与分析
+    "quantstats>=0.0.62",
+    "statsmodels>=0.13.5",
+    "arch>=7.2.0",
+    "pykalman>=0.10.1",
+    "matplotlib>=3.7",
+    # 可视化
+    "bokeh>=3.3.0",
+    "plotly>=6.4.0",
+    "PyQt6>=6.11.0",
+    "PyQt6-WebEngine>=6.11.0",
+    "PyQt6-Fluent-Widgets>=1.11.1",
+    "pylightcharts>=0.1.0",
+    # 实盘对接（天勤 TQSDK）
+    "tqsdk>=3.4.10",
+    "tqsdk-ctpse>=1.0.2",
+    "tqsdk-sm>=1.0.5",
+    # 因子分析
+    "scikit-learn>=1.3",
+    "holoviews>=1.18",
+    "tqdm>=4.65",
+    # 强化学习
+    "torch>=1.13.1",
+    "torchcontrib>=0.0.2",
+    "gymnasium>=0.29",
+    # 工具与辅助库
+    "rich>=13.0.0",
+    "addict>=2.4.0",
+    "cachetools>=5.3.0",
+    "retrying>=1.3.4",
+    "psutil>=5.9.4",
+    "iteration-utilities>=0.11.0",
+    "joblib>=1.2.0",
+    "colorlog>=6.7.0",
+    "typing-extensions>=4.12.2",
+    # 参数优化
+    "optuna>=3.4.0",
+    "deap>=1.4.1",
+]
+
+[project.optional-dependencies]
+# 开发/打包工具
+dev = [
+    "build>=1.0",
+    "setuptools>=77",
+    "wheel",
+    "Cython>=3.0",
+    "autopep8>=1.6.0",
+    "pylint>=2.17.1",
+    "pipdeptree>=2.28.0",
+]
+
+[tool.setuptools]
+# 包直接在根目录，不需要指定 package-dir
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["minibt", "minibt.*"]
+# 排除编译中间目录/运行时目录（正常情况下不会存在，双保险）
+exclude = ["minibt.build", "minibt.build.*", "minibt.cython_functions.build"]
+
+# 精确白名单：只把真正需要随包分发的资源文件打进 wheel/sdist。
+# 不再使用 "**/*"，避免把 __pycache__、logs、build、生成的 html、
+# 实盘运行状态（account_info / trade_datas 等）一并打进发行包。
+[tool.setuptools.package-data]
+minibt = [
+    "data/*.csv",
+    "data/*.ini",
+    "data/*.png",
+    "data/test/*.csv",
+    "liveplot/*.js",
+    "strategy/*.js",
+]
+"minibt.data" = ["*.csv", "*.ini", "*.png", "test/*.csv"]
+"minibt.liveplot" = ["*.js"]
+"minibt.strategy" = ["*.js"]
+
+#[tool.setuptools.dynamic]
+#readme = { file = "README.md", content-type = "text/markdown" }

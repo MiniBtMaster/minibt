@@ -1,0 +1,41 @@
+# sdist 清单：只收录构建/安装真正需要的文件
+include LICENSE
+include README.md
+include pyproject.toml
+include setup.py
+include requirements.txt
+include requirements-lock.txt
+
+# ---- 随包分发的资源 ----
+recursive-include minibt/data *.csv *.ini *.png
+recursive-include minibt/liveplot *.js
+recursive-include minibt/strategy *.js
+
+# ---- Cython 源码（从 sdist 安装时需要用它现场编译）----
+recursive-include minibt *.pyx
+
+# ---- 排除运行时 / 生成 / 中间产物 ----
+prune minibt/build
+prune minibt/cython_functions/build
+recursive-exclude minibt/logs *
+recursive-exclude minibt/strategy/plots *
+recursive-exclude minibt/strategy/analysis_reports *
+recursive-exclude minibt/op_params *
+exclude minibt/strategy/setting.json
+exclude minibt/strategy/backtest_result.json
+exclude minibt/liveplot/account_info
+exclude minibt/liveplot/id
+exclude minibt/liveplot/init_datas
+exclude minibt/liveplot/manual_update
+exclude minibt/liveplot/pause_status
+exclude minibt/liveplot/strategys
+exclude minibt/liveplot/trade_datas
+exclude minibt/liveplot/update_datas
+
+# ---- 全局排除垃圾文件 ----
+global-exclude *.py[cod]
+global-exclude *.pyd *.so *.dylib
+global-exclude *.c
+global-exclude *.bak *.old *.orig *.rej
+global-exclude *~
+global-exclude "*.pyx.bak"

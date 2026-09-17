@@ -1,0 +1,50 @@
+# ===== Python 字节码 / 缓存 =====
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ===== 构建产物 =====
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+wheelhouse/
+
+# ===== Cython 生成 / 编译产物 =====
+*.pyd
+*.so
+*.dylib
+*.c        # cythonize 从 .pyx 生成，不入库
+*.html     # 回测/因子报告等运行时生成
+
+# ===== 虚拟环境 / 工具 =====
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ===== minibt 运行时数据（不随仓库/发行包分发）=====
+minibt/logs/
+minibt/strategy/plots/
+minibt/strategy/analysis_reports/
+minibt/op_params/*.csv
+minibt/liveplot/account_info
+minibt/liveplot/id
+minibt/liveplot/init_datas
+minibt/liveplot/manual_update
+minibt/liveplot/pause_status
+minibt/liveplot/strategys
+minibt/liveplot/trade_datas
+minibt/liveplot/update_datas
+minibt/liveplot/replay/
+minibt/strategy/backtest_result.json
+minibt/strategy/setting.json
+
+# ===== 编辑器 / 系统 =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

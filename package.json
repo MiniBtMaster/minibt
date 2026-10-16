@@ -1,0 +1,191 @@
+{
+  "name": "minibt-charts",
+  "displayName": "MiniBT Charts",
+  "description": "在 VS Code 编辑器页里运行并查看 MiniBT 策略图表（pylightcharts / bokeh，回测 / 回放 / 实时）。",
+  "version": "0.3.7",
+  "publisher": "MiniBtMaster",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "minibt",
+    "quant",
+    "trading",
+    "backtest",
+    "chart",
+    "pylightcharts",
+    "bokeh",
+    "kline"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MiniBtMaster/minibt"
+  },
+  "icon": "media/icon.png",
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "minibt.runInEditor",
+        "title": "在编辑器页运行策略图表",
+        "category": "MiniBT",
+        "icon": {
+          "light": "media/run-light.svg",
+          "dark": "media/run-dark.svg"
+        }
+      },
+      {
+        "command": "minibt.showLog",
+        "title": "显示策略日志（带进度）",
+        "category": "MiniBT",
+        "icon": "$(output)"
+      },
+      {
+        "command": "minibt.reloadChart",
+        "title": "刷新图表",
+        "category": "MiniBT",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "minibt.stopChart",
+        "title": "停止策略进程",
+        "category": "MiniBT",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "minibt.openInBrowser",
+        "title": "在浏览器中打开图表",
+        "category": "MiniBT",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "minibt.showOutput",
+        "title": "显示策略输出（原始日志）",
+        "category": "MiniBT"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "minibt.runInEditor",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "when": "editorLangId == python"
+      },
+      {
+        "command": "minibt.showLog",
+        "key": "ctrl+alt+l",
+        "mac": "cmd+alt+l",
+        "when": "editorLangId == python"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "minibt.runInEditor",
+          "group": "navigation"
+        },
+        {
+          "command": "minibt.showLog",
+          "when": "minibt.chartOpen",
+          "group": "navigation"
+        },
+        {
+          "command": "minibt.reloadChart",
+          "when": "minibt.chartOpen",
+          "group": "navigation"
+        },
+        {
+          "command": "minibt.stopChart",
+          "when": "minibt.chartOpen",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "minibt.reloadChart",
+          "when": "minibt.chartOpen"
+        },
+        {
+          "command": "minibt.stopChart",
+          "when": "minibt.chartOpen"
+        },
+        {
+          "command": "minibt.openInBrowser",
+          "when": "minibt.chartOpen"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "MiniBT Charts",
+      "properties": {
+        "minibt.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "运行策略用的 Python 解释器（需要它的环境里装了 minibt）。"
+        },
+        "minibt.engine": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "pylightcharts",
+            "bokeh"
+          ],
+          "enumDescriptions": [
+            "跟随策略里写的 gui：Gui.Bokeh → bokeh；Gui.Pylightcharts / Gui.PylightchartsWeb / 没写 → pylightcharts 网页版（推荐）",
+            "强制 pylightcharts 网页版",
+            "强制 bokeh"
+          ],
+          "default": "auto",
+          "description": "图表引擎。auto 跟随策略；纯 pylightcharts 原生窗口无法嵌入 VS Code，会被换成同一渲染器的网页版。"
+        },
+        "minibt.port": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "图表本地服务端口；0 = 自动挑一个空闲端口（推荐）。"
+        },
+        "minibt.cwd": {
+          "type": "string",
+          "default": "",
+          "description": "策略的工作目录（用于相对路径取数据）；留空 = 工作区根目录。"
+        },
+        "minibt.extraPythonArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "附加给 Python 的参数，例如 [\"-X\", \"faulthandler\"]。"
+        },
+        "minibt.openBrowser": {
+          "type": "boolean",
+          "default": false,
+          "description": "是否额外用系统浏览器打开图表（默认只在编辑器页里显示）。"
+        },
+        "minibt.openLog": {
+          "type": "boolean",
+          "default": true,
+          "description": "运行时自动打开「MiniBT 策略日志」页签（带进度条）。"
+        },
+        "minibt.keepAliveOnClose": {
+          "type": "boolean",
+          "default": false,
+          "description": "关闭图表页签时是否保留策略进程（默认关闭页签即停止）。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "npx --yes @vscode/vsce package",
+    "vsix": "npx --yes @vscode/vsce package",
+    "publish": "npx --yes @vscode/vsce publish",
+    "publish:ovsx": "npx --yes ovsx publish",
+    "ls": "npx --yes @vscode/vsce ls"
+  }
+}

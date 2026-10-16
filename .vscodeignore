@@ -1,0 +1,10 @@
+# 打包 .vsix 时不带这些（runner/ 里的 Python 入口必须留下）
+.vscode/**
+.gitignore
+**/*.ts
+**/*.map
+**/node_modules/**
+**/__pycache__/**
+**/*.pyc
+link-dev.ps1
+PUBLISHING.md

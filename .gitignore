@@ -1,0 +1,5 @@
+node_modules/
+*.vsix
+_vsix_backup/
+__pycache__/
+*.pyc

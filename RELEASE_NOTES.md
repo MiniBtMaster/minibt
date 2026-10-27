@@ -1,90 +1,54 @@
-# minibt 1.3.3 发布说明
+# minibt-charts 0.3.11 发布说明
 
-**发布版本**：`1.3.3`
+**版本**：0.3.11
 **发布日期**：2026-10-27
-**Python**：>= 3.12
-**许可证**：MIT
+**适用**：VS Code 1.85+ / Cursor / VSCodium / Gitpod / Theia
 
-## 一句话
+## 亮点
 
-1.3.3 继续打磨“指标 → 回测 → 回放 → 实盘”的完整链路：纯指标策略不再产生
-空的回测页，desk 的本地图表 / 实时图表策略、账户、行情与图表样式进一步统一。
+- **VS Code 内打开 minibt desk**：新增命令
+  「MiniBT: 打开 MiniBT 看盘终端」，快捷键 `Ctrl+Alt+D`；
+  编辑器标题栏图标 / 状态栏「MiniBT 看盘」也可启动。
+- **看盘终端（报价 + 看盘 + 交易）直接嵌在编辑器页签里**：扩展开启
+  `python -m minibt desk --browser --no-browser --json` 子进程，等待
+  `/healthz` 就绪后把本地页面嵌入 iframe；关闭页签或停止命令会结束进程。
+- **天勤密码走 VS Code 加密存储**：命令「设置天勤密码（加密存储）」写入
+  `SecretStorage`，不写 `settings.json`；优先级
+  `SecretStorage` → `MINIBT_TQ_PASSWORD` → `settings.json`。
+- **启动前体检**：天勤账号 + 密码 → 期货 + 股票；只有 FutuOpenD →
+  只连股票；都没有 → 提示输入账号 / 只连股票 / 进入离线演示。
+- **窗口 / 页签图标**：统一使用 minibt desk 的 K 线 LOGO（深浅两套）。
 
-## 主要内容
+## 修复
 
-### 指标与策略
-
-- 没有 `next()`、不产生交易的纯指标策略只展示指标，不再多出「回测结果 /
-  指标记录」两个空页签。
-- 本地图表支持单合约 / 配对策略、指标信号回测与参数优化；策略、指标、交易
-  记录和权益曲线使用同一套合约与账户。
-- 实时图表支持多合约策略、按类名加载策略、先加载全部 K 线再挂策略。
-- 策略回测的持仓线、停止线、盈亏散点、交易记录与多策略权益 / 回撤对齐继续修复。
-
-### 图表与 desk
-
-- `PlotInfo` 样式在 desk 落地：线型 / 线宽 / 图例 / 色带 / 信号样式 /
-  统计表格 / 水印 / 逐点信号文字。
-- 多布局、指标归属、副图显隐、指标刷新频率、布局保存与恢复统一。
-- 首页、行情报价、商品搜索、指标选择器、模板、预警对话框与模拟账户面板完善。
-- 修复切换合约后旧指标 / 旧策略 / 旧预警线残留，以及主题、分隔线、图例齿轮、
-  NaN 断点等显示问题。
-
-### 数据与交易
-
-- 期货走天勤、股票走富途；富途股票支持沪深 / 香港 / 美国 / 日本市场。
-- 天勤多账户、快期模拟 / 实盘切换、股票下单数量单位、行情订阅与断线重连修复。
-- 富途行情额度、股票订阅池、过期缓存与报价刷新策略继续完善。
-
-### 文档与工具
-
-- VS Code 扩展更新到 **minibt-charts 0.3.11**，新增 desk 终端入口。
-- `tutorials/indicators/` 增加总索引，逐个示例可直接运行。
-- 包内新增 `CHANGELOG.md` / `RELEASING.md` / 本发布说明，打包资料不再散落。
+- 修复浏览器壳 desk 页面白屏：`desk.html` 使用相对路径 `./desk.js`，
+  服务端现在同时支持 `/desk.js` 与 `/static/desk.js`。
+- 修复浏览器壳收不到补丁：`SseTransport` 订阅 `/events`，命令在
+  SSE `onopen` 后发送，避免首屏补丁丢失。
+- VS Code 内打开 desk 时不再同时弹系统浏览器（使用 `--no-browser`）。
+- 本地开发优先使用工作区 / 仓库里的 `minibt` 源码，避免误用
+  site-packages 旧版。
 
 ## 安装
 
 ```bash
-pip install minibt==1.3.3
+code --install-extension minibt-charts-0.3.11.vsix
 ```
 
-开发 / 打包：
-
-```bash
-pip install "minibt[dev]"
-```
-
-## 兼容性
-
-- Python **3.12+**。
-- 图表渲染依赖 `pylightcharts>=0.1.5`；推荐使用刚发布的 **0.1.6**。
-- 期货实盘需要 `tqsdk` / 天勤账号；股票行情与交易需要 `futu-api` 与
-  FutuOpenD 网关。没有账号也可以运行全部内置数据回测 / 回放示例。
+或从 VS Code 扩展面板安装 **MiniBT Charts**；VSCodium / Cursor 等使用
+Open VSX。安装后建议执行 `Developer: Reload Window`。
 
 ## 验证
 
-发布前执行：
-
 ```bash
-cd minibt
-python -m pytest ../tests/test_minibt_packaging.py -q
-python -m build --wheel
-python -m twine check dist/*
+node --check extension.js
+node --check desk.js
+python -m py_compile runner/vscode_runner.py
+npx --yes @vscode/vsce package
 ```
 
-并在干净环境安装 wheel 后做 `import minibt` 与内置数据冒烟测试。
+## 说明
 
-## 产物
-
-```text
-minibt/dist/minibt-1.3.3-cp312-cp312-win_amd64.whl
-minibt/dist/minibt-1.3.3.tar.gz
-```
-
-平台标签以实际构建机为准；sdist 内已包含 Cython `.pyx` 源码和打包前资料。
-
-## 已知说明
-
-- 本包包含 Cython 扩展；从 sdist 安装需要 C 编译器、Cython 与 NumPy 头文件。
-- 没有编译环境时可设置 `MINIBT_NO_CYTHON=1` 走纯 Python 回退（性能会下降）。
-- 实盘 / 股票示例需要相应账号和网关，不属于离线冒烟测试范围。
+本扩展需要目标 Python 环境安装 `minibt`（以及 `pylightcharts`）。
+看盘终端还支持离线模式：在设置中打开 `minibt.desk.offline`，不连接任何
+行情网关也可以查看界面 / 本地图表。

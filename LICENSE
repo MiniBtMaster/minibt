@@ -1,6 +1,11 @@
 MIT License
 
-Copyright (c) 2025 owen9527
+Copyright (c) 2023 louisnw01 (lightweight-charts-python)
+Copyright (c) 2025 pylightcharts contributors
+
+This project is a derivative work based on lightweight-charts-python
+(https://github.com/louisnw01/lightweight-charts-python, MIT).
+It embeds TradingView Lightweight Charts™ (Apache-2.0), see NOTICE.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

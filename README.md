@@ -1,467 +1,258 @@
-# MiniBT — 一站式量化交易策略开发库
+# MiniBT Charts（VS Code 扩展）
 
-[![Python Version](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![PyPI version](https://img.shields.io/pypi/v/minibt.svg)](https://pypi.org/project/minibt/)
-[![Version](https://img.shields.io/badge/version-1.3.3-green.svg)](https://github.com/MiniBtMaster/minibt)
+[![VS Marketplace](https://img.shields.io/visual-studio-marketplace/v/MiniBtMaster.minibt-charts?label=marketplace&color=green)](https://marketplace.visualstudio.com/items?itemName=MiniBtMaster.minibt-charts)
+[![Open VSX](https://img.shields.io/open-vsx/v/MiniBtMaster/minibt-charts?label=Open%20VSX&color=purple)](https://open-vsx.org/extension/MiniBtMaster/minibt-charts)
+[![GitHub](https://img.shields.io/badge/GitHub-minibt--charts-181717?logo=github)](https://github.com/MiniBtMaster/minibt-charts)
 
-MiniBT 是一个覆盖量化交易**全流程**的 Python 开发库：从指标计算、策略编写、回测分析，到参数优化、K线回放、实盘交易，再到机器学习与强化学习，全部通过一套极简 API 打通。基于 Python 3.12+，MIT 许可证。
+当前版本 **0.3.11** · [CHANGELOG](CHANGELOG.md) · [RELEASE_NOTES](https://github.com/MiniBtMaster/minibt-charts/blob/main/RELEASE_NOTES.md)
 
-## 🆕 v1.3.3 更新亮点
+安装渠道：
 
-- **🖥️ minibt desk 行情终端**：一个进程同时提供**报价页 + 多标签看盘页**，
-  期货走天勤、股票走富途；内置二级报价、持仓线、账户面板、下单、预警、
-  多布局、回放、指标样式与本地图表，支持 Qt 桌面 / 浏览器 / 离线三种启动方式；
-- **🧩 minibt-charts 0.3.11**：VS Code 内新增「打开 MiniBT 看盘终端」命令，
-  可直接在编辑器页打开 desk；天勤密码走 VS Code 加密存储，带连接体检、
-  离线演示、SSE 看盘和状态栏一键启停；
+- **VS Code**：扩展面板搜 `MiniBT Charts`，或
+  [VS Marketplace](https://marketplace.visualstudio.com/items?itemName=MiniBtMaster.minibt-charts)；
+- **VSCodium / Gitpod / Theia 等**：[Open VSX](https://open-vsx.org/extension/MiniBtMaster/minibt-charts)；
+- **离线 / 指定版本**：下载本仓库 [Releases](../../releases) 里的 `.vsix`，
+  `code --install-extension minibt-charts-x.y.z.vsix --force`。
+  （[VSX Pulse](https://vsx-pulse.org/Extension/MiniBtMaster.minibt-charts)
+  是一个第三方索引，可用来查版本，安装仍建议走上面两个市场。）
 
-v1.3.2 的主要更新（`signal_backtest(gui=...)`、多策略权益/回撤对齐、
-`from_signals` 报表口径修复、`KLine.run` 的 `.ta` 竞态修复）见更新日志。
+在 **VS Code 编辑器页签**里运行并查看 [MiniBT](https://github.com/MiniBtMaster/minibt)
+的图表 —— 图表、日志和代码**在同一个页签组内按标签切换**（默认不拆分页面，
+不会把编辑区宽度减半）；想要左右分屏可把 `minibt.openBeside` 设为 `true`：
 
-完整清单见[包内 CHANGELOG](CHANGELOG.md) 或 [官网更新日志](https://www.minibt.cn/changelog/)。
+- **回测 / K 线回放 / 实时行情**三种策略场景（`Bt().run()` / `Bt(replay=True).run()` / `Bt(live=True).run()`）；
+- **`btplot` 指标图**（`ind.btplot()` / `kline.macd().btplot()`）；
+- 通过编辑器标题栏的**快速按钮**（**MiniBT 专属的 K 线图标**）运行策略和指标。
 
-## ✨ 核心优势
-
-- **🚀 极简开发**：约 20 行代码即可完成一个完整策略，无需关心底层细节，精力聚焦策略思想。
-- **📊 指标即插即用**：内置 10+ 指标库（Pandas-TA、TA-Lib、TradingView、Tulip、FinTA、BtInd、TqTa、TqFunc、Factors、Pair 等），数千个指标一行调用。
-- **⚡ 高性能回测**：信号级 Cython 快速回测 + 完整策略回测双引擎，回测/实盘同一套策略代码，零改写切换。
-- **🎯 内置优化器**：网格搜索 / Optuna 贝叶斯优化，单目标 / 多目标 / 加权，收益、胜率、夏普、回撤等指标一键寻优。
-- **🖥️ 可视化 & 回放**：**三个引擎 × 三种场景 = 九种模式** —— 引擎为 **Bokeh**（浏览器，纯 bokeh server）、**纯 pylightcharts**（原生窗口）、**pylightcharts_web**（浏览器 + SSE）；场景为**回测 / 回放 / 实时**，支持逐 K 线回放，直观观察信号与交易过程。
-- **🤖 智能交易**：集成 ElegantRL 强化学习，让策略具备自适应能力。
-- **🏷️ 逐点信号文本**：信号点可就地标注**不同文本**（支持多行），样式（字号 / 颜色 /
-  行距 / 偏移 / 字体 / 底色 / 边框）**一套参数**在 bokeh 与 pylightcharts 两个图表上同时生效。
-- **🔗 实盘对接**：基于 TQSDK（天勤）无缝连接期货实盘，支持图表 / 后台串行 / 多进程并行三种部署模式。
-
-## 📦 安装
-
-默认安装即为**全功能**（指标 / 回测 / 图表 / 参数优化 / 统计报告 / 实盘 / 强化学习）：
-
-```bash
-pip install minibt
+```
+Ctrl+Alt+B   运行策略，图表开在编辑器页签（实时刷新）
+Ctrl+Alt+M   同上（备用；若装了 Code Runner 等占用了这个键就被它抢走了）
+Ctrl+Alt+L   策略日志页签（带进度条）
+Ctrl+C       在图表页里停止策略进程，并关闭图表 / 日志页签（等同「停止策略进程」按钮）
 ```
 
-> 全部重依赖（PyQt6、torch、tqsdk、quantstats 等）都采用**按需惰性 import**：
-> 依赖会一并安装，但 `import minibt` 不会加载它们，启动时间仍保持在 **~1.2s**。
+## 快速开始
 
-开发 / 打包额外工具：
+1. 你的 Python 环境里装好 minibt：
 
-```bash
-pip install "minibt[dev]"
-```
+   ```bash
+   pip install minibt
+   ```
 
-## 🚀 快速开始
+2. 装了多个 Python / 用了虚拟环境时，在工作区设置 `.vscode/settings.json` 里指定：
 
-一个完整的双均线交叉策略只需约 20 行：
+   ```json
+   { "minibt.pythonPath": ".venv/Scripts/python.exe" }
+   ```
 
-```python
-from minibt import *
+   （**不指定也行** —— 扩展会自动挑一个 `minibt` 依赖齐全的解释器 ✓）
 
-class MA(Strategy):
-    params = dict(length1=10, length2=20)
+3. 打开策略 / 指标 `.py`，按 **`Ctrl+Alt+B`**（或点标题栏的 **K 线按钮**）——
+   图表就开在**编辑器页签**里；关掉页签即结束策略进程，日志在 `MiniBT` 输出面板 ✓。
 
-    def __init__(self):
-        self.kline = self.get_kline(LocalDatas.test)          # 1. 加载数据（内置测试数据）
-        self.ma1 = self.kline.close.sma(self.params.length1)  # 2. 计算指标
-        self.ma2 = self.kline.close.sma(self.params.length2)
-        self.long_signal = self.ma1.cross_up(self.ma2)       # 3. 定义信号：金叉/死叉
-        self.short_signal = self.ma1.cross_down(self.ma2)
+## 它是怎么做到的
 
-    def next(self):                                          # 4. 逐 K 线交易逻辑
-        if not self.kline.position:
-            if self.long_signal.new:
-                self.kline.buy()
-            elif self.short_signal.new:
-                self.kline.sell()
-        elif self.kline.position > 0 and self.short_signal.new:
-            self.kline.sell()
-        elif self.kline.position < 0 and self.long_signal.new:
-            self.kline.buy()
+| MiniBT 图表模式 | 能否嵌进 VS Code | 说明 |
+| --- | --- | --- |
+| `Gui.Pylightcharts`（原生窗口） | ❌ | PyQt6 + WebView2 的**独立操作系统窗口**，webview 装不下 |
+| `Gui.PylightchartsWeb`（网页版） | ✅ **默认就用它** | 同一套 lightweight-charts + pylightcharts bundle，画出来的图**完全一致**，只是容器从原生窗口换成浏览器页 |
+| `Gui.Bokeh` | ✅ | bokeh server 是网页：回放/实时按 URL 嵌 iframe，回测自动导出成自包含 HTML |
 
-if __name__ == "__main__":
-    Bt().run()          # 5. 一键回测并出图（默认 pylightcharts 原生窗口）
-    # 想用 bokeh：Bt().run(gui=Gui.Bokeh)；网页版：gui=Gui.PylightchartsWeb
+扩展在运行策略前接管 `Bt.run` / `btplot`，**跟随策略里写的 gui**：
 
-# ⚠️ Windows / macOS 上，入口脚本请带 main 保护（否则原生窗口起不来：
-#    子进程会重新执行本脚本）。v1.3.0 起会自动回退到浏览器版并提示。
-# if __name__ == '__main__':
-#     Bt().run()
-```
-
-## 🖥️ minibt desk：一体化行情终端（1.3.3）
-
-`minibt.desk` 是随 1.3.3 一起完善的桌面行情终端：**报价页 + 多标签看盘页 +
-账户 / 交易 / 预警 / 回放 / 本地图表**都在同一个本地进程里，UI 由
-`pylightcharts` 的 JS/TS 页面驱动，Python 只负责数据、策略和交易。
-
-### 启动
-
-```python
-from minibt import Desk, tq_auth
-
-desk = Desk(title='minibt桌面端', theme='dark')
-desk.add_futures(tq_auth=tq_auth('天勤账号', '天勤密码'))  # 期货 / 快期模拟
-desk.add_stocks()          # 股票：需要本机 FutuOpenD，默认 127.0.0.1:11111
-desk.run()                 # 默认 Qt 桌面窗口
-```
-
-或者直接用命令行：
-
-```bash
-minibt desk --user 账号 --password 密码          # 期货 + 股票
-minibt desk --user 账号 --password 密码 --no-stocks
-minibt desk --offline                            # 不连网关，打开本地图表
-minibt desk --browser                            # 浏览器壳（无 Qt 依赖）
-minibt desk --check --json                       # 只体检连接 / 合约数量
-```
-
-富途网关**不需要账号**：只要本机打开并登录 FutuOpenD，就可以只看股票。
-天勤 / 富途都没连上时，desk 会进入**离线本地图表**，不阻塞启动。
-
-### 界面能力
-
-| 模块 | 能力 |
+| 策略里写的 | 扩展里看到的 |
 | --- | --- |
-| **报价页** | 期货 / 主连 / 指数 / 期权 / 股票 chips、交易所筛选、搜索、虚拟滚动报价表、sparkline、底部 Ticker；左键合约概览气泡、双击开图、右键周期菜单 |
-| **看盘页** | 每个合约一个 tab，周期 / 6 种图表类型 / 指标工具栏、OHLC 行、LWC 主图 + 成交量、二级报价 5 档、持仓线、预警线、回放条 |
-| **指标** | 完整指标目录（PandasTA / TuLip / 天勤TA / Pine / BtInd / TqFunc …）、搜索 / 收藏 / 模板、就地改参数、线型 / 线宽 / 颜色 / 价格线、主副图与共享副图 |
-| **账户 / 交易** | 11 张账户指标卡、持仓 / 委托 / 成交 / 未成委托、多账户切换、期货与股票下单、平 / 反 / 全 / 撤、实盘二次确认、模拟账户 |
-| **布局 / 回放** | 单图 / 左右两图 / 四图，每格独立合约与指标；布局保存 / 导入 / 导出；逐 K 线回放与多格联动 |
-| **本地图表** | 直接加载本地 CSV，挂指标、策略、回测、参数优化；没有行情账号也能完整使用 |
-| **对外集成** | `QtTransport` / `SseTransport` / `RestTransport` / `MockTransport`；`window.Desk.mountDesk(...)` 可嵌进任意网页；`minibt-charts` 在 VS Code 里打开 |
+| `gui=Gui.Bokeh` | bokeh（回放/实时用 bokeh server 嵌 iframe；回测是自包含 HTML 快照） |
+| `gui=Gui.PylightchartsWeb` | pylightcharts 网页版（本地 SSE + iframe，活图） |
+| `gui=Gui.Pylightcharts`（原生窗口） | 自动换成**同一渲染器**的网页版（原生窗口没法嵌） |
+| 没写 gui | 同上（minibt 默认是原生窗口 → 网页版） |
 
-### 1.3.3 重点改进
+想强制一个引擎就设 `minibt.engine`（`pylightcharts` / `bokeh`）。
 
-- **纯指标策略不再生成空的「回测结果 / 指标记录」页**。
-- 本地图表 / 实时图表支持单合约、配对策略、策略回测 / 参数优化、模拟账户、
-  持仓线与 BtStop 停止线；切换合约会清掉旧指标 / 旧策略 / 旧预警线。
-- 指标样式、图例眼睛 / 齿轮、副图显隐、指标刷新频率、布局保存与恢复统一。
-- 报价缓存、合约清单、天勤断线重试、富途股票订阅池与多市场账户继续修复。
-- **minibt-charts 0.3.11** 新增 VS Code 内的 desk 终端入口（见下一节）。
+> 策略里写的是 `Gui.Pylightcharts` 也没关系 —— 你看到的仍然是 pylightcharts
+> 渲染的图表。需要原生窗口（多显示器摆放、窗口拖拽）时，照旧直接运行策略。
 
-## 📖 重要功能
+扩展只看两类标记，非常直白：
 
-### 1. 指标即插即用
-
-K线 / IndSeries / IndFrame 直接调用全部内置指标库，无需自写基础指标：
-
-```python
-rsi  = self.kline.close.rsi(14)                         # Pandas-TA 指标
-macd = self.kline.close.MACD()                          # TA-Lib 指标
-pmax = self.kline.close.btind.pmax3()                   # BtInd 指标
-sma  = self.kline.close.tqfunc.sma(75, 0.02)            # TqFunc 指标
-ut   = self.kline.tradingview.UT_Bot_Alerts()           # TradingView 指标（含信号）
-
-rsi  = self.kline.rsi(14,close = self.kline.open)       # 使用开盘价计算rsi指标（close 为默认）
-atr  = self.kline.atr(14,high=_high,low=_low,close=_close)  # 使用其它最高最低价、收盘价计算atr指标
+```
+MINIBT_URL=http://127.0.0.1:PORT/    → iframe 嵌本地服务（活图，持续刷新）
+MINIBT_HTML=/path/chart.html         → 自包含 HTML 直接当页签内容（bokeh 回测/静态图）
 ```
 
-### 2. 自定义指标 `BtIndicator`
+## 看盘终端（minibt desk）
 
-继承 `BtIndicator`，在 `next()` 中计算并返回输出线，自动生成交易信号：
-
-```python
-class CCI(BtIndicator):
-    params = dict(CCI_PERIOD=10, CCI_UPPER=100, CCI_LOWER=-100)
-    isplot = dict(long_signal=False, short_signal=False)   # 控制显示
-
-    def next(self):
-        cci = self.close.cci(self.params.CCI_PERIOD)
-        long_signal  = cci.cross_up(self.params.CCI_UPPER)
-        short_signal = cci.cross_down(self.params.CCI_LOWER)
-        # 方式一：将指标值赋值给 `lines`
-        self.lines.cci = cci
-        self.lines.long_signal = long_signal
-        self.lines.short_signal = short_signal
-        # 方式二：直接返回指标值
-        # return cci, long_signal, short_signal
-
-class CCIStrategy(Strategy):
-    def __init__(self):
-        self.kline = self.get_kline(LocalDatas.pp2609_60)
-        self.cci = CCI(self.kline)
-
-    def next(self):
-        if not self.kline.position:
-            if self.cci.long_signal.new:
-                self.kline.buy(stop=BtStop.SegmentationTracking)
-            elif self.cci.short_signal.new:
-                self.kline.sell(stop=BtStop.SegmentationTracking)
-
-if __name__ == "__main__":
-    Bt().run()
-```
-
-### 3. 信号快速回测 `signal_backtest`
-
-指标内置信号回测引擎，无需编写策略即可评估，支持完整止损/止盈体系：
-
-```python
-ind = CCI(kline)   # 任意含 long_signal/short_signal 的指标
-
-result = ind.signal_backtest(
-    commission=1.0, com_type=1,
-    sl_stop=0.01,   tp_stop=0.03,   stop_mode=2,    # 止损止盈（tick/金额/百分比三模式）
-    sl_trail=1,                                      # 移动止损
-    max_hold_bars=5,                                 # 持仓超时强平
-    # sl_callback=my_sl, sl_callback_args=(...),    # 动态止损/止盈回调
-    isplot=True, isreport=True,
-)
-result.pprint()    # 统计报告 + 资金曲线
-```
-
-### 4. 参数优化
-
-策略级优化有两种方式：
-
-**方式一：策略类属性 `op_config`（推荐，最简洁）**
-
-在策略类上定义 `op_config`，`Bt.run()` 会自动检测并执行优化，无需手动调用 `optstrategy()`：
-
-```python
-class MyStrategy(Strategy):
-    params = dict(len1=10, len2=20, a=1.0)
-    op_config = OpConfig(
-        target=['profit', 'sharpe', 'max_drawdown'],
-        weights=(1., 1., 1.),
-        opconfig=OptunaConfig(n_trials=10),
-        op_method='optuna',
-        params={'len1': (5, 21, 1), 'len2': (10, 31, 1), 'a': (0.5, 3., 0.1)},
-    )
-    ...
-
-if __name__ == "__main__":
-    Bt().run()   # 自动识别 op_config，执行参数优化
-```
-
-**方式二：手动调用 `optstrategy()`**
-
-```python
-if __name__ == "__main__":
-    bt = Bt()
-    bt.optstrategy(['profit', 'sharpe', 'max_drawdown'], (1., 1., 1.),
-                   opconfig=OptunaConfig(n_trials=10), op_method='optuna',
-                   len1=(5, 21, 1), len2=(10, 31, 1), a=(0.5, 3., 0.1))
-    bt.run()
-```
-
-信号级优化（`OptimizeConfig`：单/多目标、网格/Optuna、加权）：
-
-```python
-config = OptimizeConfig(
-    params={'length1': (5, 30, 2), 'length2': (30, 60, 2)},
-    target=['max_drawdown', 'sharpe', 'win_rate'],
-    weights=(-1.0, 3.0, 1.5),          # 回撤最小化、夏普与胜率最大化
-    method='optuna', config={'n_trials': 100, 'sampler': 'TPESampler'},
-)
-result = ind.signal_backtest(optimize=config)
-result.plot_optuna()
-```
-
-### 5. 自定义止损 `Stop`
-
-继承 `Stop`，实现 `long()/short()` 即可打造 ATR 动态止损等任意止损逻辑：
-
-```python
-class ATRDynamicStop(Stop):
-
-    def __init__(self, atr_length: int = 14, atr_mult: float = 1.0):
-        self.atr_length = atr_length
-        self.atr_mult = atr_mult
-        self.atr = self.kline.atr(self.atr_length)  
-
-    def long(self):
-        stop = self.low[-1] - self.atr_mult * self.atr[-1]
-        # 写入多头止损价
-        self.stop_price.new = stop
-        # 写入多头止盈价
-        self.target_price.new = self.kline.open_price + (self.kline.open_price - stop) * 2 
-    def short(self):
-        ...
-
-BtStop.ATRDynamicStop = ATRDynamicStop      # 注册后即可在策略中使用
-```
-
-### 6. 多周期 K 线
-
-`resample()` 一键切换周期，指标自动对齐（只适用于回测）：
-
-```python
-self.kline_1m = self.get_kline(LocalDatas.v2509_60)
-self.kline_5m = self.kline_1m.resample(300)   # 1分钟 → 5分钟
-self.ma_1m = self.kline_1m.close.sma(20)
-self.ma_5m = self.kline_5m.close.sma(20)()   # 上采样回主周期
-```
-
-### 7. 多策略加载 `addstrategy`
-
-支持策略类 / 模块名 / .py 路径 / 目录 / 包路径混合加载，并可传参：
-
-```python
-bt = Bt()
-bt.addstrategy('cci', 'cmo')                          # 模块名自动发现
-bt.addstrategy('./strategy/cci.py')                   # 文件路径
-bt.addstrategy('strategy')                            # 目录批量加载
-mystrategy= MyStrategy.copy(params=dict(symbol="l2609_60"))
-bt.addstrategy(mystrategy)  # 副本+参数
-bt.run(gui=Gui.Pylightcharts)
-```
-
-### 8. K 线回放 `replay`
-
-逐 K 线推进回测，直观复现实时交易过程：
-
-```python
-class ReplayStrategy(Strategy):
-    def __init__(self):
-        self.kline = self.get_kline(LocalDatas.test)
-        self.test = self.kline.tradingview.UT_Bot_Alerts()
-
-    def next(self):
-        if not self.kline.position:
-            if self.test.long_signal.new:
-                self.kline.buy(stop=BtStop.SegmentationTracking)
-            elif self.test.short_signal.new:
-                self.kline.sell(stop=BtStop.SegmentationTracking)
-
-if __name__ == "__main__":
-    Bt(replay=True).run(period_milliseconds=1000, gui=Gui.Pylightcharts)
-```
-
-### 9. 实盘交易（TQSDK）
-
-回测通过的策略，切换 `Bt(live=True)` 即可实盘，支持三种部署模式：
-
-```python
-bt = Bt(live=True)
-bt.addstrategy(CCIStrategy, CMOStrategy)
-bt.addTqapi(tq_auth=tq_auth(user_name="账号", password="密码"))
-
-bt.run()                                   # 模式一：pylightcharts 实时图表（原生窗口）
-# bt.run(isplot=False)                     # 模式二：后台串行（低资源）
-# bt.run(isplot=False, run_parallel=True)  # 模式三：多进程并行（互相隔离）
-```
-
-### 10. 机器学习 & 强化学习
-
-集成 ElegantRL 强化学习，策略一行配置即可训练：
-
-```python
-class RLStrategy(Strategy):
-    rl = True  # 开启强化学习
-    def __init__(self):
-        # 初始化指标特征
-        ...
-        # 配置强化学习模型
-        self.set_model_params(
-            agent=Agents.AgentDiscretePPO, if_discrete=True,
-            train=True, break_step=1e6, state_dim=..., action_dim=...,
-            auto_process_features=True,        # 自动处理指标特征
-        )
-
-    def reset(self):
-        # 重置强化学习模型
-        ...
-    
-    def step(self):
-        # 训练和测试强化学习模型
-        ...
-    # 训练 / 回测 / 实盘统一由 Bt 调度
-```
-
-## 🧩 VS Code 扩展：图表 + minibt desk（minibt-charts 0.3.11）
-
-图表也能像代码文件一样开在 **VS Code 编辑器页签**里（回测 / 回放 / 实时都行）。
-扩展**跟随策略里写的 gui**：`Gui.Bokeh` 用 bokeh（回放/实时是 bokeh server，
-回测是自包含 HTML 快照），`Gui.Pylightcharts` / `Gui.PylightchartsWeb` 用
-pylightcharts 网页版（本地 SSE + iframe 活图）—— 原生窗口嵌不进 VS Code，
-会被换成**同一个渲染器**的网页版，图形完全一致；`btplot(...)` 一样跟随。
+`minibt desk` 本来就能**脱离 Qt** 跑：
 
 ```bash
-# 安装（在 minibt 仓库的 vscode-minibt/ 目录里打包，或下载现成的 .vsix）
-npx --yes @vscode/vsce package
-code --install-extension minibt-charts-0.3.11.vsix
+python -m minibt desk --browser            # 起 127.0.0.1 服务 + 打开浏览器
+python -m minibt desk --browser --json      # 额外打一行就绪 JSON（扩展读它）
 ```
 
-也可以直接从市场装：VS Code 扩展面板搜 **`MiniBT Charts`**，或
-[VS Marketplace](https://marketplace.visualstudio.com/items?itemName=MiniBtMaster.minibt-charts) /
-[Open VSX](https://open-vsx.org/extension/MiniBtMaster/minibt-charts)（VSCodium / Gitpod 等）。
+扩展就是起这个子进程、等 `GET /healthz` 返回 `{"ready": true, ...}`，再把
+`http://127.0.0.1:PORT/` 交给 iframe 外壳 —— 和「策略图表」用同一套壳，
+所以页面里的一切（报价 / K 线 / 指标 / 交易 / 回放）都和桌面版一致 ✓。
 
-装好后**不必先配解释器**（`0.3.6` 起会自动挑一个装了 `minibt` / `pylightcharts`
-的 Python：先看 `python.defaultInterpreterPath`，再试 `py -0p` 列出的各版本，
-最后 `python` / `python3`，选第一个依赖齐的；只在都不行时才提示安装缺失模块）。
-想固定某个解释器/工作目录时，再写工作区 `.vscode/settings.json`：
+> 0.3.11 起修复了浏览器壳的补丁链路（`SseTransport` 订阅 `/events`）：
+> 报价页的类型/交易所 chips 和行情会正常出现与刷新。
+
+## 命令
+
+| 命令（命令面板 `Ctrl+Shift+P` 输入 `MiniBT`） | 快捷键 | 作用 |
+| --- | --- | --- |
+| `MiniBT: 在编辑器页运行策略图表` | `Ctrl+Alt+B`（备用 `Ctrl+Alt+M`） | 当前编辑器是 `.py` 就用它；否则弹文件选择框 |
+| `MiniBT: 显示策略日志（带进度）` | `Ctrl+Alt+L` | 日志页签 + 进度条（认 `进度 x/y`、`xx%`、`[i/n]`，报错标红） |
+| `MiniBT: 刷新图表` | — | 重新加载图表（live 页签加时间戳防缓存；快照页签重读文件） |
+| `MiniBT: 停止策略进程` | `Ctrl+C`（图表页里） | 结束整棵策略进程树（关页签时也会自动结束） |
+| `MiniBT: 在浏览器中打开图表` | — | 用系统浏览器打开同一张图（live 用地址，快照用文件） |
+| `MiniBT: 显示策略输出（原始日志）` | — | 打开 `MiniBT` 输出面板 |
+| **`MiniBT: 打开 MiniBT 看盘终端`** | `Ctrl+Alt+D` | 起 `minibt desk`（报价 + 看盘 + 交易），页面嵌在编辑器页签里 |
+| **`MiniBT: 停止看盘终端`** | `Ctrl+Alt+Shift+D` | 结束看盘终端进程（关页签也会自动结束） |
+| `MiniBT: 显示看盘终端日志` | — | 打开 `MiniBT 看盘` 输出面板 |
+| `MiniBT: 设置天勤密码（加密存储）` | — | 密码存 VS Code `SecretStorage`，**不写 settings.json** |
+| `MiniBT: 清除已保存的天勤密码` | — | 删掉加密存储里的密码 |
+
+编辑器标题栏会有一个 **MiniBT 快速按钮**（K 线图标），就在原生「运行 ▾」
+按钮右边的同一行里（「运行」是**独立图标**，不占 VS Code 原生运行按钮 ✓）；
+图表页签自己则会出现「日志 / 刷新 / 停止」图标按钮。
+
+在**图表页里按 `Ctrl+C`** 就会停止当前策略进程，并把「MiniBT 图表」
+和「MiniBT 策略日志」两个页签一起关掉（和点「停止策略进程」按钮一样）。
+图表是嵌在 VS Code webview 里的跨域 iframe，父页面收不到它里面的按键，
+所以这个热键是**注入到图表页内部**的（见 `runner/vscode_runner.py`），
+无论焦点在图表上还是页签外壳上都能生效。
+
+## 设置
+
+| 设置项 | 默认 | 说明 |
+| --- | --- | --- |
+| `minibt.pythonPath` | `python` | **最重要**：指向装了 `minibt` 的解释器（例如虚拟环境的 `python.exe`）；留默认 `python` 且它不能用时会**自动挑**一个 |
+| `minibt.engine` | `auto` | `auto` 跟随策略（`Gui.Bokeh` → bokeh；`Gui.Pylightcharts` / `PylightchartsWeb` → 网页版）；也可强制 `pylightcharts` / `bokeh` |
+| `minibt.port` | `0` | 本地服务端口；0 = 自动挑空闲端口（推荐）；想固定地址再设 |
+| `minibt.cwd` | 空 | 策略的工作目录（相对路径取数据用）；留空 = 工作区根目录 |
+| `minibt.extraPythonArgs` | `[]` | 附加 Python 参数，如 `["-X", "faulthandler"]` |
+| `minibt.openBrowser` | `false` | 是否额外用系统浏览器打开 |
+| `minibt.openLog` | `true` | 运行时自动打开日志页签 |
+| `minibt.openBeside` | `false` | 图表/日志在代码右侧单独开一列（左右分屏）；关闭（默认）则与代码在同一页签组内按标签切换，不拆分页面 |
+| `minibt.keepAliveOnClose` | `false` | 关闭图表页签时是否保留策略进程 |
+
+### 看盘终端（`minibt desk`）
+
+| 设置项 | 默认 | 说明 |
+| --- | --- | --- |
+| `minibt.desk.account` | 空 | 天勤账号（快期）；**留空 = 不连期货** |
+| `minibt.desk.password` | 空 | 明文兜底；推荐用命令「设置天勤密码」（加密存储）。优先级：`SecretStorage` → 环境变量 `MINIBT_TQ_PASSWORD` → 这里 |
+| `minibt.desk.futuHost` | `127.0.0.1` | FutuOpenD 地址（Futu 客户端改过地址才需要改） |
+| `minibt.desk.futuPort` | `11111` | FutuOpenD 端口 |
+| `minibt.desk.stocks` | `auto` | `auto` 检测到 FutuOpenD 就连 / `on` 总是连 / `off` 只看期货 |
+| `minibt.desk.offline` | `false` | 离线演示（不连任何网关，只看界面 / 演示数据） |
+| `minibt.desk.theme` | `auto` | 跟随 VS Code 配色，或固定 `dark` / `light` |
+| `minibt.desk.autoStart` | `false` | 打开工作区就自动起（**会常驻一个 Python 进程**） |
+| `minibt.desk.port` | `0` | 本地服务端口；0 = 自动挑空闲端口 |
+
+工作区示例（`.vscode/settings.json`）：
 
 ```jsonc
-{ "minibt.pythonPath": ".venv/Scripts/python.exe", "minibt.cwd": "${workspaceFolder}" }
+{
+  "minibt.pythonPath": ".venv/Scripts/python.exe",
+  "minibt.desk.account": "你的天勤账号",
+  "minibt.desk.futuPort": 11111,
+  "minibt.desk.theme": "auto"
+}
 ```
 
-| 命令（`Ctrl+Shift+P` 搜 `MiniBT`） | 快捷键 | 作用 |
-| --- | --- | --- |
-| `在编辑器页运行策略图表` | `Ctrl+Alt+M` | 图表开在编辑器页签，实时/回放会持续刷新 |
-| `显示策略日志（带进度）` | `Ctrl+Alt+L` | 日志页签，带进度条（认 `进度 x/y`、`xx%`） |
-| `停止策略进程` / `刷新图表` | — | 结束子进程 / 重新加载图表 |
-| `在浏览器中打开图表` | — | 用系统浏览器打开同一张图 |
-| `MiniBT: 打开 MiniBT 看盘终端` | `Ctrl+Alt+D` | 在编辑器页打开 minibt desk（0.3.11 新增） |
-| `MiniBT: 设置天勤密码（加密存储）` | — | 密码写入 VS Code `SecretStorage`，不写 settings.json |
-| `MiniBT: 停止看盘终端` / `显示看盘日志` | — | 停止 desk 子进程 / 查看启动日志 |
+> 密码**别写在这里**（工作区设置会跟着仓库走）。用命令
+> 「MiniBT: 设置天勤密码」存进加密存储，或设环境变量
+> `MINIBT_TQ_PASSWORD`。扩展传给子进程一律走环境变量，命令行 / `ps` 里
+```bash
+$env:MINIBT_TQ_USER = '账号'
+$env:MINIBT_TQ_PASSWORD = '密码'
+```
 
-编辑器标题栏里还会出现一个 **MiniBT 快速按钮**（K 线图标）—— 和 Pi Agent
-Studio 一样，就排在 VS Code 原生「运行 ▾」按钮右边的**同一行**里，任何文件
-都能看到，点它直接运行当前策略。
+**启动前会体检**：有账号 + 密码 → 期货（+ 股票）；没账号但 FutuOpenD 通
+（TCP 探 `127.0.0.1:11111`）→ 只连股票；**都没有会弹提醒**，让选
+【输入天勤账号】【只连 Futu 股票】【进入离线演示】【打开设置】，
+选过就记住，下次不再打扰 ✓。状态栏右侧的「MiniBT 看盘」会显示
+`● 期货+股票` / `○ 未启动`，点一下就能起停。
 
-### minibt-charts 0.3.11：把 desk 开进 VS Code
+> 建议在**工作区设置**里指定虚拟环境的解释器：
+> `.vscode/settings.json` → `{"minibt.pythonPath": ".venv/Scripts/python.exe"}`。
+> 想让它自动找，就**不要**显式配 —— 扩展会依次试
+> `python.defaultInterpreterPath`、`py -0p` 列出的各版本、`python`/`python3`，
+> 选第一个能 `import rich, pylightcharts` 的（minibt 的依赖齐）。
 
-0.3.11 新增 **「打开 MiniBT 看盘终端」**：扩展会启动
-`python -m minibt desk --browser --json`，等待本地服务 `/healthz` 就绪后把
-desk 页面嵌进编辑器页签。它和「在编辑器页运行策略图表」使用同一套
-子进程 + 本地服务 + iframe 机制，不需要把 PyQt 窗口塞进 VS Code。
+## 常见问题
 
-- **入口**：编辑器标题栏 🕯 图标 / 命令面板 / 状态栏「MiniBT 看盘」/ `Ctrl+Alt+D`；
-- **启动体检**：有天勤账号 + 密码 → 期货 + 股票；没有天勤但 FutuOpenD 通 →
-  只连股票；都没有 → 弹窗选择【输入天勤账号】【只连 Futu 股票】【进入离线演示】；
-- **密码安全**：优先使用 VS Code `SecretStorage`，其次 `MINIBT_TQ_PASSWORD`，
-  最后才是 `settings.json`；传给子进程走环境变量，不出现在命令行 / `ps` 里；
-- **配置项**：`minibt.desk.account` / `password` / `futuHost` / `futuPort` /
-  `stocks` / `offline` / `theme` / `autoStart` / `port`，全部有默认值；
-- **状态栏**：点「MiniBT 看盘」可启动 / 停止常驻 desk；
-- **修复**：浏览器壳 SSE 订阅、`/desk.js` 静态资源 404、VS Code 内不再弹系统浏览器、
-  本地开发优先使用工作区里的 minibt 源码。
+**图表页签一直白屏 / 提示"图表服务没起来"**
+1. 打开 `MiniBT` 输出面板看报错；
+2. 确认 `minibt.pythonPath` 的解释器里装了 minibt：
+   `python -c "import minibt; print(minibt.__version__)"`；
+3. 报 `ModuleNotFoundError: No module named 'xxx'` 说明解释器选错了 —— 输出面板
+   会告诉你当前用的是哪个 `python.exe`、缺哪个包，并给出可直接复制的
+   `"...\python.exe" -m pip install xxx`；也可以直接把 `minibt.pythonPath`
+   指向装了 minibt 的那个解释器；
+4. 确认策略里取数据用的是**绝对路径**或正确的工作目录（`minibt.cwd`）；
+5. 换一个端口试试（`minibt.port`）。
 
-> ⚠️ **纯 pylightcharts 原生窗口无法嵌入 VS Code** —— 它是 PyQt6 + WebView2 的
-> 独立操作系统窗口。扩展用的是**同一个渲染器**的网页版，图形完全一致；
-> 需要原生窗口时照旧直接运行策略即可。
+**页签里看不到实时刷新**
+网页版是 SSE 推送、bokeh 是 server 推送，两者都是实时的；bokeh 的**回测结果**
+本来就是一帧定格（静态 HTML），这是正常的。
 
-详见 [图表引擎与九种运行模式](https://www.minibt.cn/minibt_basic/1.29minibt_chart_modes/)
-的「九、在 VS Code 里看图表」一节。
+**bokeh 回测为什么是"快照"而不是活图？**
+bokeh 的回测结果是一个静态 HTML 页面（没有 server），扩展会把它作为静态页签嵌
+进来；回放/实时才是 bokeh server（活图）。
 
-## 🔬 更多示例
+## 从源码开发
 
-完整示例见 [`tutorials/`](https://github.com/MiniBtMaster/minibt/tree/main/tutorials) 目录：
+独立仓库（`minibt-charts`）的根目录就是扩展目录：
 
-| 功能                                            | 示例文件                                 |
-| ----------------------------------------------- | ---------------------------------------- |
-| 信号回测与止损止盈（20 种组合）                 | `basic/signal_stop.py`                   |
-| 信号级参数优化（网格/Optuna）                   | `basic/signal_optimize.py`               |
-| 策略级参数优化                                  | `basic/optstrategy.py`                   |
-| 自定义止损（ATR 动态止损）                      | `basic/stop.py`、`basic/stop_params.py`  |
-| K 线回放                                        | `basic/strategy_replay.py`               |
-| 实盘三种模式                                    | `basic/live_trading_modes.py`、`basic/live_chart.py` |
-| 多策略加载                                      | `basic/load_strategies_from_dir.py`      |
-| 指标交易逻辑                                    | `basic/indicator_step.py`                |
-| 多指标策略                                      | `basic/multi_indicator_strategies.py`    |
-| 经典策略库（CCI/RSI/Hull/VPT/随机森林等 17 个） | `strategies/`                            |
-| 指标体系（12 个门面 / 自定义 / 字段 / 解包 / 回测 / 性能 / 共享副图） | `tutorials/indicators/`（见 `tutorials/indicators/README.md`） |
+```bash
+git clone https://github.com/MiniBtMaster/minibt-charts.git
+cd minibt-charts
 
-## 📚 相关资源
+npm run package                    # 生成 minibt-charts-0.3.11.vsix
+code --install-extension minibt-charts-0.3.11.vsix --force
+```
 
-- **在线教程**：[https://www.minibt.cn](https://www.minibt.cn)
-- **更新日志**：[包内 CHANGELOG](CHANGELOG.md) · [官网](https://www.minibt.cn/changelog/)
-- **发布说明**：[1.3.3 RELEASE_NOTES](RELEASE_NOTES.md)
-- **GitHub**：[https://github.com/MiniBtMaster/minibt](https://github.com/MiniBtMaster/minibt)
-- **PyPI**：[https://pypi.org/project/minibt/](https://pypi.org/project/minibt/)
-- **作者**: owen | **邮箱**: 407841129@qq.com
+日常调试：在 VS Code 里打开扩展目录按 **F5**，或直接用目录联接：
 
-## 📄 许可证
+```powershell
+powershell -ExecutionPolicy Bypass -File link-dev.ps1
+```
 
-本项目采用 [MIT](https://github.com/MiniBtMaster/minibt/blob/main/LICENSE) 许可证。
+如果当前在 **minibt 主仓库**里，扩展源码位于 `vscode-minibt/`，把上面的
+`cd minibt-charts` 换成 `cd vscode-minibt` 即可。
+
+### 仓库结构
+
+```text
+extension.js                 扩展入口：命令 / webview / 子进程
+desk.js                      minibt desk 启动参数、连接体检、状态栏逻辑
+runner/vscode_runner.py      Python 侧：启动策略 / 图表服务 / 停止进程
+media/                       图标（扩展 / 运行 / desk，深浅两套）
+package.json                 清单：命令、快捷键、设置、VSIX 元数据
+CHANGELOG.md                 版本历史
+RELEASE_NOTES.md             当前版本可粘贴到 GitHub Release 的正文
+PUBLISHING.md                VSIX / Marketplace / Open VSX 发布教程
+GITHUB.md                    GitHub 首次上传 / tag / Release 流程
+.github/workflows/           CI + 自动打包并挂 Release 的工作流
+```
+
+## 开发 / 打包 / 发布
+
+见 [`PUBLISHING.md`](https://github.com/MiniBtMaster/minibt-charts/blob/main/PUBLISHING.md)
+（本地 VSIX 安装、F5 调试、发布到 Marketplace 全流程、常见报错表）和
+[`GITHUB.md`](https://github.com/MiniBtMaster/minibt-charts/blob/main/GITHUB.md)
+（GitHub 首次上传、tag、自动 Release）。
+
+本仓库 CI 会执行：
+
+```bash
+node --check extension.js
+node --check desk.js
+python -m py_compile runner/vscode_runner.py
+npx --yes @vscode/vsce ls
+```
+
+完整 minibt monorepo 里还有 `tests/test_vscode_extension.py`，会校验清单/代码/
+运行器三方一致（命令、设置项、打包白名单；并确认不再占用
+`editor/title/run` ✓）。

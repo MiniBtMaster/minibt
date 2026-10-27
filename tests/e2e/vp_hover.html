@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>vp hover</title>
+  <link rel="stylesheet" href="../../pylightcharts/js/styles.css">
+  <script src="../../pylightcharts/js/lightweight-charts.js"></script>
+</head>
+<body style="margin:0">
+  <div id="container" style="width:900px;height:600px"></div>
+  <pre id="result">PENDING</pre>
+  <script src="../../pylightcharts/js/bundle.js"></script>
+  <script>
+  (function () {
+    window.__draws = 0;
+    window.__anchors = [];
+    window.__hover = 'unset';
+    window.__raf = 0;
+    const tick = () => { window.__raf++; requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+    try {
+      const h = new Lib.Handler('c1', 1.0, 1.0, 'left', false);
+      Lib.register('c1', h);
+      const data = [];
+      for (let i = 0; i < 200; i++) {
+        const t = 1600000000 + i * 86400;
+        const o = 100 + Math.sin(i / 5) * 10;
+        data.push({ time: t, open: o, high: o + 3, low: o - 3, close: o + (i % 2 ? 1 : -1) });
+      }
+      h.series.setData(data);
+
+      Lib.registerCallback('vp_draw', ['target', 'priceConverter', 'view'],
+        'window.__draws++;\n' +
+        'var bars = view.visibleBars();\n' +
+        'if (bars.length) {\n' +
+        '  var last = bars[bars.length - 1];\n' +
+        '  var hx = window.__hover;\n' +
+        '  if (typeof hx === "number") {\n' +
+        '    var best = null, bd = Infinity;\n' +
+        '    for (var i = 0; i < bars.length; i++) {\n' +
+        '      var d = Math.abs(bars[i].x - hx); if (d < bd) { bd = d; best = bars[i]; }\n' +
+        '    }\n' +
+        '    if (best) last = best;\n' +
+        '  }\n' +
+        '  window.__anchors.push(last.x);\n' +
+        '  if (window.__anchors.length > 40) window.__anchors.shift();\n' +
+        '}');
+      Lib.registerCallback('vp_price', ['row', 'view'], 'return [row.lo, row.hi];');
+      Lib.registerCallback('vp_empty', ['data', 'view'], 'return false;');
+      const cs = Lib.invoke('c1', 'createCustomSeries',
+        ['vp', {}, 'vp1', 0,
+         { rendererDraw: 'vp_draw', priceValueBuilder: 'vp_price', isWhitespace: 'vp_empty' },
+         true]);
+      const rows = data.map((d, i) => {
+        const r = { time: d.time, lo: d.low, hi: d.high };
+        for (let j = 0; j < 4; j++) r['vp' + j] = 0;
+        r['vp' + (i % 4)] = 100;
+        return r;
+      });
+      cs.series.setData(rows);
+      window.__series = cs.series;
+      window.__rows = rows;
+
+      // 与 minibt 同样的注册方式
+      h.addCrosshairListener((param) => {
+        window.__hover = (param && param.point) ? param.point.x : null;
+      });
+      window.__report = () => ({
+        draws: window.__draws,
+        anchor: window.__anchors[window.__anchors.length - 1],
+        hover: window.__hover,
+        raf: window.__raf,
+      });
+      document.getElementById('result').textContent = 'READY';
+    } catch (e) {
+      document.getElementById('result').textContent = 'RESULT_ERROR ' + e;
+    }
+  })();
+  </script>
+</body>
+</html>

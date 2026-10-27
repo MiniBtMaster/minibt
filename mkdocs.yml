@@ -1,0 +1,66 @@
+site_name: pylightcharts
+site_description: TradingView Lightweight Charts™ for Python
+repo_url: https://github.com/MiniBtMaster/pylightcharts
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Guide:
+      - Charts and data: guide/charts.md
+      - Indicators: guide/indicators.md
+      - Drawing tools: guide/drawings.md
+      - Custom series: guide/custom-series.md
+      - Panes: guide/panes.md
+      - Crosshair tooltips: guide/tooltips.md
+      - Multiple charts and the page top bar: guide/multi-chart.md
+      - Floating tables: guide/table.md
+      - Panels (DataGrid / Sparkline): guide/panels.md
+      - Two symbols, two price scales: guide/two-price-scales.md
+      - Infinite history: guide/infinite-history.md
+      - Options and styling: guide/options.md
+      - Events: guide/events.md
+      - Qt integration: guide/qt.md
+      - Examples: guide/examples.md
+      - Migrating: guide/migration.md
+      - Changelog: changelog.md
+  - Advanced:
+      - Bridge architecture: advanced/bridge.md
+      - Deferred features and known gaps: advanced/deferred.md
+      - Bulk data: advanced/bulk-data.md
+      - Formatters and custom axes: advanced/custom-scale.md
+      - Headless rendering: advanced/headless.md
+      - LWC v5.2 API coverage roadmap: advanced/lwc-v5.2-api-coverage.md
+      - LWC v5.2 API implementation report: advanced/api-implementation-report.md
+  - API reference: api.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true

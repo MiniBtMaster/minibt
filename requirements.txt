@@ -1,0 +1,9 @@
+# Runtime dependencies for pylightcharts.
+#
+# pyproject.toml is the source of truth for packaging (the wheel metadata is
+# generated from it); this file exists for `pip install -r requirements.txt`
+# workflows and mirrors the `dependencies` list there.
+
+pandas>=1.5
+numpy>=1.23
+pywebview>=5.0.5

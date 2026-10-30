@@ -1,32 +1,36 @@
-# sdist = 完整源码树（wheel 只带 pylightcharts/ + js 资源）。
-#
-# 目的：`pip download pylightcharts --no-binary :all:` 解出来的 sdist
-# 里，`pytest tests -q` 与 `examples/` 都能直接用（不然 tests/ 里的
-# 示例测试会因为找不到 examples/ 而失败）。
+# sdist 清单：只收录构建/安装真正需要的文件
 include LICENSE
-include NOTICE
 include README.md
-include README.zh-CN.md
-include RELEASING.md
 include pyproject.toml
+include setup.py
 include requirements.txt
-include requirements-dev.txt
-include mkdocs.yml
+include requirements-lock.txt
+include CHANGELOG.md
+include RELEASE_NOTES.md
+include RELEASING.md
 
-recursive-include docs *.md *.yml
-recursive-include examples *.py *.md *.ipynb *.json *.html *.css *.js *.txt
-recursive-include scripts *.py *.json *.md
-recursive-include tests *.py *.json *.md
-recursive-include jslib *.ts *.json *.mjs *.css *.html *.md
+# ---- 随包分发的资源（项目根 == minibt/，所以路径不带 minibt/ 前缀）----
+recursive-include data *.csv *.ini *.png
+recursive-include strategy *.js
 
-# JS 构建产物与依赖不进 sdist（bundle 已随 pylightcharts/js 发布）
-prune jslib/node_modules
-prune jslib/dist
-prune jslib/typings
-prune jslib/coverage
-prune jslib/.rollup.cache
+# ---- Cython 源码（从 sdist 安装时需要用它现场编译）----
+recursive-include cython_functions *.pyx
+recursive-include zigzag *.pyx
 
-global-exclude __pycache__
+# ---- 排除运行时 / 生成 / 中间产物 ----
+prune build
+prune cython_functions/build
+recursive-exclude logs *
+recursive-exclude strategy/plots *
+recursive-exclude strategy/analysis_reports *
+recursive-exclude op_params *
+exclude strategy/setting.json
+exclude strategy/backtest_result.json
+
+# ---- 全局排除垃圾文件 ----
 global-exclude *.py[cod]
-global-exclude *.so
-global-exclude .DS_Store
+global-exclude *.pyd *.so *.dylib
+global-exclude *.c
+global-exclude *.bak *.old *.orig *.rej
+global-exclude *~
+global-exclude "*.pyx.bak"

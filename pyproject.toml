@@ -1,64 +1,177 @@
+# ===========================================================================
+# 打包步骤
+#   1) 复位 LocalDatas 索引：只列包内基础数据（minibt/data/test/*.csv），
+#      免得把本机 ~/.minibt/datas 里的私人数据名写进 wheel。
+#      **已自动化**：`python -m build` 会经过 setup.py 的 build_py / sdist
+#      钩子（`reset_local_datas_index()`），构建前自动复位；并有“import 到的
+#      必须是本目录源码”的守卫，绝不会去改 site-packages 里那份。
+#      手动兜底（在 minibt/ 的上一层目录执行）：
+#          python -c "import minibt.data.tools as t; print(t.__file__); t.reset_index()"
+#      它只重新生成 minibt/data/utils.py，不会删任何 CSV 文件。
+#   2) cd minibt && python -m build --wheel
+#   3) python -m pip install 文件名.whl
+# ===========================================================================
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+# 方案 A：构建时现场编译 Cython 扩展，因此需要 Cython 与 numpy
+requires = ["setuptools>=77", "Cython>=3.0", "numpy>=2.2.6"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pylightcharts"
-version = "0.1.7"
-description = "TradingView Lightweight Charts for Python (bridged, near-full API coverage)"
+name = "minibt"
+version = "1.3.4"
+description = "一站式量化交易策略开发库，简化从策略搭建到实盘交易的全流程"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = { text = "MIT" }
-authors = [{ name = "owen", email = "407841129@qq.com" }]
-keywords = ["financial-charting", "charting", "candlestick", "tradingview", "lightweight-charts"]
+keywords = ["quant", "trading", "backtest", "strategy", "indicator", "futures", "tqsdk"]
+authors = [
+    { name = "owen", email = "407841129@qq.com" }
+]
+urls = {Homepage = "https://github.com/MiniBtMaster/minibt", Documentation = "https://www.minibt.cn/", Repository = "https://github.com/MiniBtMaster/minibt", Issues = "https://github.com/MiniBtMaster/minibt/issues", Changelog = "https://github.com/MiniBtMaster/minibt/blob/main/CHANGELOG.md"}
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Financial and Insurance Industry",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Topic :: Office/Business :: Financial :: Investment",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Office/Business :: Financial :: Investment"
 ]
+# ===========================================================================
+# 依赖：默认安装即为全功能（策略 / 指标 / 回测 / 看图 / 参数优化 / 统计报告 /
+# 实盘 / 强化学习 / 因子分析）。
+# 注意：所有重依赖都是“按需惰性 import”，因此安装体积虽大，
+# 但 `import minibt` 仍保持 ~1.2s 的快速启动。
+# ===========================================================================
 dependencies = [
-    "pandas>=1.5",
-    "numpy>=1.23",
-    "pywebview>=5.0.5",
+    # 基础数据处理库
+    "numpy>=2.2.6",
+    "pandas>=2.2.0,<=2.3.3",
+    "pandas-ta>=0.3.14b0",
+    "jedi>=0.18",
+    # 不要加 numpy-ext：它的元数据写死 numpy<1.30，与上面的 numpy>=2.2.6
+    # 冲突（新版 pip 解析直接失败）。ta.py 用的是自带的 prepend_na /
+    # _rolling_window_1D，不依赖它。
+    "numba>=0.60",            # pandas_ta 与 @stop_callback 均需要
+    # 量化指标与分析库
+    "TA-Lib>=0.4.24",
+    "finta>=1.3",
+    "scipy>=1.7.0",
+    "tulipy>=0.4.0",
+    # 统计报告与分析
+    "quantstats>=0.0.62",
+    "statsmodels>=0.13.5",
+    "arch>=7.2.0",
+    "pykalman>=0.10.1",
+    "matplotlib>=3.7",
+    # 可视化
+    "bokeh>=3.3.0",
+    "plotly>=6.4.0",
+    "PyQt6>=6.11.0",
+    "PyQt6-WebEngine>=6.11.0",
+    "PyQt6-Fluent-Widgets>=1.11.1",
+    # 1.3.0 的统计表格用到 0.1.3 才有的 create_table(margin_x=/margin_y=)；
+    # 1.3.x 又用到 0.1.4 的 enable_legend_menu / enable_legend_collapse /
+    # OrderTicket / remove_markers / prefer_single_gap / skip_gap_segments /
+    # set_line_style / set_line_width / set_line_color / set_price_visible；
+    # 0.1.5 修了浏览器 / Jupyter 初始图不出指标、reading 'series' 等；
+    # 0.1.7（desk 资源重建）带来多布局格 2..N 的增量指标、右键指标模板、
+    # 首页预览 K 线开关、画线按「合约|周期」持久化等前端修复
+    "pylightcharts>=0.1.7",
+    # 实盘对接（天勤 TQSDK）
+    "tqsdk>=3.4.10",
+    "tqsdk-ctpse>=1.0.2",
+    "tqsdk-sm>=1.0.5",
+    # 实盘对接（富途 OpenAPI）——股票行情/交易（StockApi）；需配合 FutuOpenD 网关
+    "futu-api>=10.0",
+    # 因子分析
+    "scikit-learn>=1.3",
+    "holoviews>=1.18",
+    "tqdm>=4.65",
+    # 强化学习
+    "torch>=1.13.1",
+    "torchcontrib>=0.0.2",
+    "gymnasium>=0.29",
+    # 工具与辅助库
+    "rich>=13.0.0",
+    "addict>=2.4.0",
+    "cachetools>=5.3.0",
+    "retrying>=1.3.4",
+    "psutil>=5.9.4",
+    "iteration-utilities>=0.11.0",
+    "joblib>=1.2.0",
+    "colorlog>=6.7.0",
+    "typing-extensions>=4.12.2",
+    # 参数优化
+    "optuna>=3.4.0",
+    "deap>=1.4.1",
 ]
 
 [project.optional-dependencies]
-qt = ["PySide6"]
-jupyter = ["ipython"]
-test = ["pytest", "pillow"]
-e2e = ["playwright", "pillow"]
-docs = ["mkdocs-material"]
-dev = ["pytest", "build", "twine", "ruff", "pillow", "playwright", "mkdocs-material"]
+# 开发/打包工具
+dev = [
+    "build>=1.0",
+    "setuptools>=77",
+    "wheel",
+    "Cython>=3.0",
+    "autopep8>=1.6.0",
+    "pylint>=2.17.1",
+    "pipdeptree>=2.28.0",
+]
 
-[project.urls]
-Homepage = "https://github.com/MiniBtMaster/pylightcharts"
-Repository = "https://github.com/MiniBtMaster/pylightcharts"
-Issues = "https://github.com/MiniBtMaster/pylightcharts/issues"
-Documentation = "https://github.com/MiniBtMaster/pylightcharts/tree/main/docs"
-Changelog = "https://github.com/MiniBtMaster/pylightcharts/blob/main/docs/changelog.md"
-PyPI = "https://pypi.org/project/pylightcharts/"
+[project.scripts]
+# 命令行入口：``minibt desk --user 账号 --password 密码``
+minibt = "minibt.cli:main"
 
 [tool.setuptools]
-include-package-data = true
+license-files = ["LICENSE"]
+# 包直接在根目录，不需要指定 package-dir
+include-package-data = false
+# ★ 本项目的布局很特殊：**项目根 == 包目录**（``minibt/setup.py`` 就住在包里），
+#   所以必须显式声明「包 ``minibt`` → 当前目录」：
+#   setuptools 对 ``Extension.sources`` / ``package_dir`` 的子包会**向上找最近的
+#   已映射父包** ✓，于是 ``minibt.data`` → ``./data``、``minibt.strategy`` →
+#   ``./strategy`` ✓。
+#
+#   以前这里是 ``[tool.setuptools.packages.find] include = ["minibt", "minibt.*"]``
+#   —— 它要去找**子目录** ``minibt/`` ✗，但项目根**就是** ``minibt/``（没有更
+#   深一层）→ **一个包都发现不了** ✗✗ → 打出来的 wheel 里只有 5 个 ``.pyd``
+#   扩展，**没有任何 .py 模块、没有 data/** ✗（实测踩到，必顶修 ✓）。
+package-dir = { "minibt" = "." }
+packages = [
+    "minibt",
+    "minibt.cython_functions",
+    "minibt.data",
+    "minibt.desk",
+    "minibt.elegantrl",
+    "minibt.elegantrl.agents",
+    "minibt.elegantrl.envs",
+    "minibt.elegantrl.train",
+    "minibt.indicators",
+    "minibt.stop",
+    "minibt.strategy",
+    "minibt.tradingsymtem",
+    "minibt.tradingstrategy",
+    "minibt.tradingstrategy.mystrategy",
+    "minibt.tradingstrategy.samples",
+    "minibt.zigzag",
+]
+# （不用 packages.find：它在这个布局下永远找不到东西 ✓）
 
-# Discover `pylightcharts` **and** its subpackages (`pylightcharts.panels`).
-# A bare `packages = ["pylightcharts"]` silently drops the subpackage from
-# both the wheel and the sdist.
-[tool.setuptools.packages.find]
-include = ["pylightcharts*"]
-
+# 精确白名单：只把真正需要随包分发的资源文件打进 wheel/sdist。
+# 不再使用 "**/*"，避免把 __pycache__、logs、build、生成的 html、
+# 实盘运行状态（account_info / trade_datas 等）一并打进发行包。
 [tool.setuptools.package-data]
-pylightcharts = ["js/*"]
+minibt = [
+    "data/*.csv",
+    "data/*.ini",
+    "data/*.png",
+    "data/test/*.csv",
+    "strategy/*.js",
+]
+"minibt.data" = ["*.csv", "*.ini", "*.png", "test/*.csv"]
+"minibt.strategy" = ["*.js"]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-norecursedirs = ["tests/legacy", "tests/e2e", "reference", "jslib", "examples", ".*"]
-markers = ["slow: long-running tests (wheel build)"]
+#[tool.setuptools.dynamic]
+#readme = { file = "README.md", content-type = "text/markdown" }

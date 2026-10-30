@@ -1,646 +1,479 @@
-# pylightcharts
+# MiniBT — 一站式量化交易策略开发库
 
-[![PyPI](https://img.shields.io/pypi/v/pylightcharts.svg)](https://pypi.org/project/pylightcharts/)
-[![Python versions](https://img.shields.io/pypi/pyversions/pylightcharts.svg)](https://pypi.org/project/pylightcharts/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/MiniBtMaster/pylightcharts/blob/main/LICENSE)
-[![Docs](https://img.shields.io/badge/docs-mkdocs--material-blue.svg)](https://github.com/MiniBtMaster/pylightcharts/tree/main/docs)
+[![Python Version](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![PyPI version](https://img.shields.io/pypi/v/minibt.svg)](https://pypi.org/project/minibt/)
+[![Version](https://img.shields.io/badge/version-1.3.4-green.svg)](https://github.com/MiniBtMaster/minibt)
 
-**English** | [简体中文](README.zh-CN.md)
+MiniBT 是一个覆盖量化交易**全流程**的 Python 开发库：从指标计算、策略编写、回测分析，到参数优化、K线回放、实盘交易，再到机器学习与强化学习，全部通过一套极简 API 打通。基于 Python 3.12+，MIT 许可证。
 
-Python bindings for [TradingView Lightweight Charts™](https://github.com/tradingview/lightweight-charts),
-aiming at **near-full API coverage** with a pythonic interface.
+## 🆕 v1.3.4 更新亮点
 
-> Status: **Lightweight Charts v5.2.1 API fully covered (150/150 interface methods)** —
-> 17 indicators, 13 drawing tools, numeric axes, formatters, v5 plugins, declarative
-> primitives, custom series, custom horizontal scales, CI with JS + Python tests and docs.
-> Method-by-method table: [`API_IMPLEMENTATION_REPORT.md`](https://github.com/MiniBtMaster/pylightcharts/blob/main/docs/advanced/api-implementation-report.md).
->
-> Plus a **financial-panels layer** — TradingView-style market widgets (market tables,
-> watchlists, screeners, heatmaps, tickers, quote headers, technical analysis, seasonal,
-> news, calendar, symbol details, …) rendered on the same host page and driven from Python.
-> See [Financial panels](#financial-panels-tradingview-style-widgets).
->
-> Release notes: [`docs/changelog.md`](docs/changelog.md) — latest **0.1.7**.
+- **🖥️ minibt desk 多布局 / 多页面**：本地图表可以**多开**（本地图表1 / 2 / 3…，
+  各自独立的指标与策略），一个页面只放一个策略；需要对比时用「复制当前页面」
+  或**只读叠加**（只画线、不交易）；
+- **🧠 计算搬到后台线程**：加载 `KalmanFilterStrategy` 这类重策略不再卡界面
+  （先出 K 线 → 后台算指标线 → 算完自动上图）；收盘后自动挂起，不再空转；
+- **📊 指标渲染对齐 TradingView**：`Chandelier_Exit` / `SuperTrend` 这类
+  「一半 up 一半 dn」的指标按 `linebr` **断开缺口**；增量只推最后一点
+  （实时色带不再闪）；
+- **🖱️ 图表右键增强**：「我的模板 ▸ / 保存当前指标模板」、画线共用左侧导航条、
+  画线按「合约|周期」本地持久化；
+- **📓 Jupyter 支持**：`Gui.Desk` 在 notebook 里自动用 iframe 内嵌（不再弹 Qt
+  卡死 kernel），`tutorials/plots/12~15` 四个示例开箱可用；
+- **📦 依赖升级**：`pylightcharts>=0.1.7`。
 
-## How it works
+v1.3.3 的主要更新（纯指标策略不再多出空回测页、desk 本地/实时图表策略链路、
+`PlotInfo` 样式落地）见更新日志。
 
-This is **not** a re-implementation of the charting engine in Python.
-It embeds the official, battle-tested JavaScript renderer in a WebView
-(pywebview / Qt WebEngine / wx / Jupyter / Streamlit) and drives it from Python.
+## ✨ 核心优势
 
-```
-Python API  ──►  JSON / JS bridge  ──►  Lib.Handler (TypeScript)  ──►  Lightweight Charts v5
-```
+- **🚀 极简开发**：约 20 行代码即可完成一个完整策略，无需关心底层细节，精力聚焦策略思想。
+- **📊 指标即插即用**：内置 10+ 指标库（Pandas-TA、TA-Lib、TradingView、Tulip、FinTA、BtInd、TqTa、TqFunc、Factors、Pair 等），数千个指标一行调用。
+- **⚡ 高性能回测**：信号级 Cython 快速回测 + 完整策略回测双引擎，回测/实盘同一套策略代码，零改写切换。
+- **🎯 内置优化器**：网格搜索 / Optuna 贝叶斯优化，单目标 / 多目标 / 加权，收益、胜率、夏普、回撤等指标一键寻优。
+- **🖥️ 可视化 & 回放**：**三个引擎 × 三种场景 = 九种模式** —— 引擎为 **Bokeh**（浏览器，纯 bokeh server）、**纯 pylightcharts**（原生窗口）、**pylightcharts_web**（浏览器 + SSE）；场景为**回测 / 回放 / 实时**，支持逐 K 线回放，直观观察信号与交易过程。
+- **🤖 智能交易**：集成 ElegantRL 强化学习，让策略具备自适应能力。
+- **🏷️ 逐点信号文本**：信号点可就地标注**不同文本**（支持多行），样式（字号 / 颜色 /
+  行距 / 偏移 / 字体 / 底色 / 边框）**一套参数**在 bokeh 与 pylightcharts 两个图表上同时生效。
+- **🔗 实盘对接**：基于 TQSDK（天勤）无缝连接期货实盘，支持图表 / 后台串行 / 多进程并行三种部署模式。
 
-Because the pixels and interactions are produced by the upstream library,
-visual fidelity and performance match the JS version.
+## 📦 安装
 
-## API coverage
-
-pylightcharts drives the upstream engine directly, so **every public method** of
-Lightweight Charts v5.2.1 is reachable. Coverage is measured by
-`scripts/check_api_coverage.py`, which parses the upstream `typings.d.ts`:
-
-| Group | Coverage |
-|---|---|
-| `IChartApi` / `ISeriesApi` / `ITimeScaleApi` / `IPriceScaleApi` / `IPaneApi` / `IPriceLine` | 100% |
-| v5 plugins (series markers, up/down markers, text & image watermarks) | 100% |
-| `ISeriesPrimitive` / `IPanePrimitive` (declarative, from Python) | 100% |
-| `ICustomSeriesPaneView` / `ICustomSeriesPaneRenderer` | 100% |
-| `IHorzScaleBehavior` (custom horizontal scale) | 100% |
-| options / type aliases (~120) | 100% passthrough |
-| 11 enums + all top-level functions | exported (`Lib.*` + `pylightcharts.constants`) |
+默认安装即为**全功能**（指标 / 回测 / 图表 / 参数优化 / 统计报告 / 实盘 / 强化学习）：
 
 ```bash
-python scripts/check_api_coverage.py          # print the matrix
-python scripts/check_api_coverage.py --check  # fail CI if coverage regresses
+pip install minibt
 ```
 
-Full method-by-method table and the list of intentional differences:
-[`API_IMPLEMENTATION_REPORT.md`](https://github.com/MiniBtMaster/pylightcharts/blob/main/docs/advanced/api-implementation-report.md).
+> 全部重依赖（PyQt6、torch、tqsdk、quantstats 等）都采用**按需惰性 import**：
+> 依赖会一并安装，但 `import minibt` 不会加载它们，启动时间仍保持在 **~1.2s**。
 
-## Financial panels (TradingView-style widgets)
-
-On top of the chart engine, `pylightcharts` ships a **panels layer**
-(`pylightcharts.panels`) that reimplements the TradingView widget family as DOM
-components on the **same host page** — no extra chart instance, so hundreds of
-table rows and heatmap tiles stay cheap. A panel is created on a `Window` (a
-chart's `win`, or a chart-less `QtPanel`) and driven from Python:
-
-```python
-from pylightcharts import QtPanel
-from pylightcharts.panels import Column, DataGrid, Heatmap, MarketData, TickerTape
-
-panel = QtPanel()
-MarketData(panel.win, groups, columns=[Column('symbol', '代码'), ...])
-Heatmap(panel.win, [{'symbol': '聚乙烯', 'value': 9, 'chg_pct': 1.2}, ...],
-        color_scheme='cn')
-TickerTape(panel.win, items, speed=70)
-panel.get_webview().show()
-```
-
-| Panel | TradingView widget |
-|---|---|
-| `QuoteBoard` | quote page: type/exchange chips + grid + ticker + loading/empty states |
-| `SymbolSearch` / `AlertDialog` | symbol picker / price-alert dialog |
-| `IndicatorPicker` / `TemplatePicker` | indicator browser (with ★ favorites) / indicator templates |
-| `DataGrid` / `Column` | the market-table primitive |
-| `MarketData`, `Watchlist` | Market Data / Market Overview / Market Summary / Watchlist |
-| `Screener` + `FilterBar` | Screener (conditions, named presets, JSON persistence) |
-| `Heatmap` (`StockHeatmap` / `CryptoHeatmap` / `EtfHeatmap` / `ForexHeatmap`) | Stock / Crypto / ETF / Forex Heatmap |
-| `Ticker` (`TickerTape` / `TickerTag` / `SingleTicker` / `Tickers`) | Ticker Tape / Tag / Single ticker / Tickers |
-| `OrderTicket` | the buy / spread / sell ticket |
-| `QuoteHeader` / `SymbolInfo` / `SymbolOverview` / `MiniChart` | Symbol Info / Symbol Overview / Mini Chart |
-| `TechnicalAnalysis` (+ `ta_summary`) | Technical Analysis (gauge + oscillator / MA tables) |
-| `SeasonalChart` (+ `seasonal_monthly`) | Seasonal Chart |
-| `EconomicCalendar` / `FundamentalData` / `CompanyProfile` / `BrokerRating` / `BrokerReviews` | symbol-detail shells |
-| `NewsFeed` / `TopStories` / `TextBlock` | Top Stories / news |
-
-- **Themes**: every panel follows the window theme — `chart.win.theme('light')`
-  (or `'dark'`, the default); panels created afterwards inherit it. Both skins are styled.
-- **Data**: the library ships **no market data** — the host feeds rows / items /
-  quotes (minibt, tqapi, CSV, …). The news / fundamentals / calendar / broker panels
-  are UI + data-contract shells.
-- **Examples**: `examples/13_panels/01_data_grid.py` … `15_alert_dialog.py`
-  (the 0.1.6 additions are `12_quote_board`, `13_symbol_search`,
-  `14_indicator_picker` and `15_alert_dialog`; each supports `--check` and
-  some `--snapshot`).
-  `10_gallery.py` is a scrollable gallery of every widget. Guide:
-  [`docs/guide/panels.md`](docs/guide/panels.md).
-
-## Acknowledgements / License
-
-- Python layer, GUI backends and drawing plugins are derived from
-  [lightweight-charts-python](https://github.com/louisnw01/lightweight-charts-python) (MIT).
-- The charting engine is
-  [TradingView Lightweight Charts™](https://github.com/tradingview/lightweight-charts) (Apache-2.0),
-  see `NOTICE`.
-
-## Migrating from lightweight-charts-python
-`pylightcharts` keeps every class, method and module-level name of the original
-package (enforced by `tests/test_lwc_compat.py`), so existing code runs with a
-one-line shim:
-
-```python
-from pylightcharts.compat import install_alias
-install_alias()                     # before any `import lightweight_charts`
-
-import lightweight_charts            # -> pylightcharts
-lightweight_charts.widgets.QWebEngineView = MyPyQt6WebEngineView   # patching still works
-```
-
-Or change the imports directly:
-
-```diff
-- from lightweight_charts.util import Events, JSEmitter
-- from lightweight_charts.widgets import QtChart
-+ from pylightcharts.util import Events, JSEmitter
-+ from pylightcharts.widgets import QtChart
-```
-
-## Qt integration
-
-Inside a desktop application, `QtChart` embeds the chart in a `QWebEngineView`:
-
-```python
-from PyQt6.QtWidgets import QApplication
-from pylightcharts.qt import prepare_qt
-
-prepare_qt('PyQt6')          # pick the binding *before* QApplication
-app = QApplication([])
-
-from pylightcharts.widgets import QtChart
-chart = QtChart(toolbox=True)
-chart.set(df)
-chart.get_webview().show()
-app.exec()
-```
-
-`QtWebEngineWidgets` must be imported before the `QApplication` exists, which is
-why `prepare_qt()` comes first; `$PYLIGHTCHARTS_QT` chooses the binding without it.
-Full details - multi-chart `sync()`, screenshots, the Chromium network noise -
-are in `docs/guide/qt.md`.
-
-## Examples
-
-### Full API tour (`examples/11_api_tour/`)
-
-Runnable, visual scripts that walk **every public API**. Each file exposes
-`build(chart)` (so it can be driven headlessly in tests) and a `main()` that opens
-a window:
-
-| File | Covers |
-|---|---|
-| `01_chart_and_data.py` | `set` / `update` / `update_from_tick` / `batch`, layout, grid, crosshair, legend, watermark, candle & volume style, precision, options |
-| `02_series_types.py` | Line/Area/Bar/Baseline/Histogram/Candlestick, price lines, markers, data readback, coordinate conversion, order, panes |
-| `03_scales_and_queries.py` | time scale (scroll / range / convert / formatters), price scale, pane queries, `chart_options`, `chart_element`, `version` |
-| `04_events.py` | click / dblclick / crosshair / range / visible-time / size / data-changed / new-bar / search / hotkeys |
-| `05_drawings.py` | all 13 drawing tools + `vertical_span`, plus `update` / `delete` / `options` |
-| `06_panes.py` | panes, stretch / height / preserve, pane primitives, pane-level series |
-| `07_indicators.py` | all 17 indicators, `add_indicator`, `add_computed_series` |
-| `08_custom_series.py` | every shape + presets + custom pane-view spec |
-| `09_plugins.py` | markers / up-down / text & image watermark lifecycles |
-| `10_primitives.py` | declarative series & pane primitives, all extension points |
-| `11_callbacks.py` | formatters, tick marks, price format, autoscale, constants |
-| `12_numeric_and_scale.py` | YieldCurve / Options charts, custom horizontal scale |
-| `13_workspace.py` | table, topbar widgets, toolbox, subcharts, sync, screenshot |
-| `14_multi_chart_layout.py` … `23_fill_between_gaps.py` | page top bar, whole-UI themes, tooltips, two symbols, infinite history, indicator panes, stem/scatter, multi-line text, NaN line & fill-between gaps - see `examples/11_api_tour/README.md` |
-| `24_layouts_and_legend_settings.py` | the migration extensions: 2D `arrange_tiles(dividers=True)` layouts, the legend gear (`enable_legend_settings`) and pinned legend rows (`pin_legend_row`), and the series style helpers (`set_line_*` / `set_price_visible` / `is_visible`) + `chart.remove()` |
-| `25_live_value_table.py` … `27_volume_profile_live.py` | crosshair-driven value table + live updates (`25`), and the Volume Profile recipe (`26` static, `27` live) - a mouse-following volume distribution pinned to the right edge of the visible range - see `examples/11_api_tour/README.md` |
-
-### Financial panels (`examples/13_panels/`)
-
-Ten scripts covering the panels layer (mock data, `--snapshot`, `PYLIGHTCHARTS_QT=`
-switchable): `01_data_grid`, `02_sparkline`, `03_market_data`, `04_ticker_and_quote`,
-`05_heatmap`, `06_seasonal`, `07_screener`, `08_details`, `09_technical`, and
-`10_gallery.py` — the last one lays every widget out in a scrollable grid so you can
-see them all at once — plus `11_sim_account_shell.py` (a full-page simulated-account
-shell with an order ticket). See [`examples/13_panels/README.md`](examples/13_panels/README.md).
-
-### Focused examples (original ten)
-
-`examples/1_setting_data` … `examples/12_browser` each keep a single topic with
-its own data: loading OHLCV, live bars, tick updates, indicator lines, styling,
-callbacks, built-in indicators, headless PNG rendering, charts in a browser tab
-(`examples/12_browser/static.py` and `live.py`, both with a main-pane SMA and a
-sub-pane RSI), custom series and the PyQt6 window. Start with
-`examples/1_setting_data/setting_data.py`.
-
-## Development
+开发 / 打包额外工具：
 
 ```bash
-# build the JS bridge + vendor the engine into pylightcharts/js/
-cd jslib && npm install && npm run build
-
-# install the python package in editable mode
-cd .. && pip install -e .
-
-# ...or use the requirement files (pyproject.toml stays the source of truth)
-pip install -r requirements.txt        # runtime only
-pip install -r requirements-dev.txt    # + tests, e2e, docs, build
+pip install "minibt[dev]"
 ```
 
-### Testing
+## 🚀 快速开始
+
+一个完整的双均线交叉策略只需约 20 行：
+
+```python
+from minibt import *
+
+class MA(Strategy):
+    params = dict(length1=10, length2=20)
+
+    def __init__(self):
+        self.kline = self.get_kline(LocalDatas.test)          # 1. 加载数据（内置测试数据）
+        self.ma1 = self.kline.close.sma(self.params.length1)  # 2. 计算指标
+        self.ma2 = self.kline.close.sma(self.params.length2)
+        self.long_signal = self.ma1.cross_up(self.ma2)       # 3. 定义信号：金叉/死叉
+        self.short_signal = self.ma1.cross_down(self.ma2)
+
+    def next(self):                                          # 4. 逐 K 线交易逻辑
+        if not self.kline.position:
+            if self.long_signal.new:
+                self.kline.buy()
+            elif self.short_signal.new:
+                self.kline.sell()
+        elif self.kline.position > 0 and self.short_signal.new:
+            self.kline.sell()
+        elif self.kline.position < 0 and self.long_signal.new:
+            self.kline.buy()
+
+if __name__ == "__main__":
+    Bt().run()          # 5. 一键回测并出图（默认 pylightcharts 原生窗口）
+    # 想用 bokeh：Bt().run(gui=Gui.Bokeh)；网页版：gui=Gui.PylightchartsWeb
+
+# ⚠️ Windows / macOS 上，入口脚本请带 main 保护（否则原生窗口起不来：
+#    子进程会重新执行本脚本）。v1.3.0 起会自动回退到浏览器版并提示。
+# if __name__ == '__main__':
+#     Bt().run()
+```
+
+## 🖥️ minibt desk：一体化行情终端（1.3.4）
+
+`minibt.desk` 是随 1.3.4 一起完善的桌面行情终端：**报价页 + 多标签看盘页 +
+账户 / 交易 / 预警 / 回放 / 本地图表**都在同一个本地进程里，UI 由
+`pylightcharts` 的 JS/TS 页面驱动，Python 只负责数据、策略和交易。
+
+### 启动
+
+```python
+from minibt import Desk, tq_auth
+
+desk = Desk(title='minibt桌面端', theme='dark')
+desk.add_futures(tq_auth=tq_auth('天勤账号', '天勤密码'))  # 期货 / 快期模拟
+desk.add_stocks()          # 股票：需要本机 FutuOpenD，默认 127.0.0.1:11111
+desk.run()                 # 默认 Qt 桌面窗口
+```
+
+或者直接用命令行：
 
 ```bash
-# unit tests: assert on the JS generated by the python bridge (no browser)
-python -m pytest -m "not slow"
-
-# e2e: run the built bundle in headless Chromium and check rendered pixels
-python tests/e2e/smoke.py
-
-# headless rendering tests (Playwright or a local Chrome/Edge)
-python -m pytest tests/test_headless.py
-
-# full stack: real pywebview window + real chart engine (needs a desktop session)
-python tests/e2e/full_stack.py
-
-# performance: JSON vs binary bulk data transfer
-python tests/e2e/benchmark.py 100000
+minibt desk --user 账号 --password 密码          # 期货 + 股票
+minibt desk --user 账号 --password 密码 --no-stocks
+minibt desk --offline                            # 不连网关，打开本地图表
+minibt desk --browser                            # 浏览器壳（无 Qt 依赖）
+minibt desk --check --json                       # 只体检连接 / 合约数量
 ```
 
-CI (`.github/workflows/ci.yml`) builds the bundle, checks the committed artifacts
-are up to date, runs the unit tests on Linux/Windows/macOS, renders in headless
-Chromium and verifies the wheel ships the JS assets.
+富途网关**不需要账号**：只要本机打开并登录 FutuOpenD，就可以只看股票。
+天勤 / 富途都没连上时，desk 会进入**离线本地图表**，不阻塞启动。
 
-### Deferred work
+### 界面能力
 
-Features that are possible but deliberately not implemented yet - touch drag
-for the layout dividers, grid layouts, destroying a chart, `zOrder` for the
-span primitives, ... - are collected in
-[`docs/advanced/deferred.md`](https://github.com/MiniBtMaster/pylightcharts/blob/main/docs/advanced/deferred.md) together with the file
-and the sketch for each one. Add an entry there instead of leaving a bare
-`TODO` in the source.
+| 模块 | 能力 |
+| --- | --- |
+| **报价页** | 期货 / 主连 / 指数 / 期权 / 股票 chips、交易所筛选、搜索、虚拟滚动报价表、sparkline、底部 Ticker；左键合约概览气泡、双击开图、右键周期菜单 |
+| **看盘页** | 每个合约一个 tab，周期 / 6 种图表类型 / 指标工具栏、OHLC 行、LWC 主图 + 成交量、二级报价 5 档、持仓线、预警线、回放条 |
+| **指标** | 完整指标目录（PandasTA / TuLip / 天勤TA / Pine / BtInd / TqFunc …）、搜索 / 收藏 / 模板、就地改参数、线型 / 线宽 / 颜色 / 价格线、主副图与共享副图 |
+| **账户 / 交易** | 11 张账户指标卡、持仓 / 委托 / 成交 / 未成委托、多账户切换、期货与股票下单、平 / 反 / 全 / 撤、实盘二次确认、模拟账户 |
+| **布局 / 回放** | 单图 / 左右两图 / 四图，每格独立合约与指标；布局保存 / 导入 / 导出；逐 K 线回放与多格联动 |
+| **本地图表** | 直接加载本地 CSV，挂指标、策略、回测、参数优化；没有行情账号也能完整使用 |
+| **对外集成** | `QtTransport` / `SseTransport` / `RestTransport` / `MockTransport`；`window.Desk.mountDesk(...)` 可嵌进任意网页；`minibt-charts` 在 VS Code 里打开 |
 
-### Packaging
+### 1.3.4 重点改进
+
+- **多布局**：格 2..N 的 K 线 / 指标增量更新（数据变了才推）、持仓线 / 挂单线
+  按格路由、换合约只换鼠标最后点击的那一格；加载策略时按合约数**保留多余格**，
+  格数不足才自动加格（更小的布局在菜单里禁用）。
+- **策略**：一个页面只放一个策略（重新加载先清上一个，布局 / 指标保留）；
+  策略实盘可同时跑多个（一个文件一个子进程）；「策略管理」可改两个运行开关、
+  查看 PID、删除；只读叠加在管理页里开关置灰（它不跑 next）。
+- **指标**：缺口断线、增量只推最后一点、加不上的指标自动回滚并弹窗提示；
+  指标 / 策略的计算放后台线程，界面不卡。
+- **本地图表**：多开 + 每页独立（指标 / 策略按页存）、加载数据只加载 K 线、
+  「复制当前页面」做 A/B 对比、只读叠加。
+- **行情**：收盘后（末根超过 `max(10 分钟, 5 个周期)` 没更新）自动挂起策略计算，
+  有新 K 线自动恢复；首页下方预览图严格按「K线」开关显示并自动重试空数据。
+- **依赖**：`pylightcharts>=0.1.7`（desk 前端资源重建）。
+
+## 📖 重要功能
+
+### 1. 指标即插即用
+
+K线 / IndSeries / IndFrame 直接调用全部内置指标库，无需自写基础指标：
+
+```python
+rsi  = self.kline.close.rsi(14)                         # Pandas-TA 指标
+macd = self.kline.close.MACD()                          # TA-Lib 指标
+pmax = self.kline.close.btind.pmax3()                   # BtInd 指标
+sma  = self.kline.close.tqfunc.sma(75, 0.02)            # TqFunc 指标
+ut   = self.kline.tradingview.UT_Bot_Alerts()           # TradingView 指标（含信号）
+
+rsi  = self.kline.rsi(14,close = self.kline.open)       # 使用开盘价计算rsi指标（close 为默认）
+atr  = self.kline.atr(14,high=_high,low=_low,close=_close)  # 使用其它最高最低价、收盘价计算atr指标
+```
+
+### 2. 自定义指标 `BtIndicator`
+
+继承 `BtIndicator`，在 `next()` 中计算并返回输出线，自动生成交易信号：
+
+```python
+class CCI(BtIndicator):
+    params = dict(CCI_PERIOD=10, CCI_UPPER=100, CCI_LOWER=-100)
+    isplot = dict(long_signal=False, short_signal=False)   # 控制显示
+
+    def next(self):
+        cci = self.close.cci(self.params.CCI_PERIOD)
+        long_signal  = cci.cross_up(self.params.CCI_UPPER)
+        short_signal = cci.cross_down(self.params.CCI_LOWER)
+        # 方式一：将指标值赋值给 `lines`
+        self.lines.cci = cci
+        self.lines.long_signal = long_signal
+        self.lines.short_signal = short_signal
+        # 方式二：直接返回指标值
+        # return cci, long_signal, short_signal
+
+class CCIStrategy(Strategy):
+    def __init__(self):
+        self.kline = self.get_kline(LocalDatas.pp2609_60)
+        self.cci = CCI(self.kline)
+
+    def next(self):
+        if not self.kline.position:
+            if self.cci.long_signal.new:
+                self.kline.buy(stop=BtStop.SegmentationTracking)
+            elif self.cci.short_signal.new:
+                self.kline.sell(stop=BtStop.SegmentationTracking)
+
+if __name__ == "__main__":
+    Bt().run()
+```
+
+### 3. 信号快速回测 `signal_backtest`
+
+指标内置信号回测引擎，无需编写策略即可评估，支持完整止损/止盈体系：
+
+```python
+ind = CCI(kline)   # 任意含 long_signal/short_signal 的指标
+
+result = ind.signal_backtest(
+    commission=1.0, com_type=1,
+    sl_stop=0.01,   tp_stop=0.03,   stop_mode=2,    # 止损止盈（tick/金额/百分比三模式）
+    sl_trail=1,                                      # 移动止损
+    max_hold_bars=5,                                 # 持仓超时强平
+    # sl_callback=my_sl, sl_callback_args=(...),    # 动态止损/止盈回调
+    isplot=True, isreport=True,
+)
+result.pprint()    # 统计报告 + 资金曲线
+```
+
+### 4. 参数优化
+
+策略级优化有两种方式：
+
+**方式一：策略类属性 `op_config`（推荐，最简洁）**
+
+在策略类上定义 `op_config`，`Bt.run()` 会自动检测并执行优化，无需手动调用 `optstrategy()`：
+
+```python
+class MyStrategy(Strategy):
+    params = dict(len1=10, len2=20, a=1.0)
+    op_config = OpConfig(
+        target=['profit', 'sharpe', 'max_drawdown'],
+        weights=(1., 1., 1.),
+        opconfig=OptunaConfig(n_trials=10),
+        op_method='optuna',
+        params={'len1': (5, 21, 1), 'len2': (10, 31, 1), 'a': (0.5, 3., 0.1)},
+    )
+    ...
+
+if __name__ == "__main__":
+    Bt().run()   # 自动识别 op_config，执行参数优化
+```
+
+**方式二：手动调用 `optstrategy()`**
+
+```python
+if __name__ == "__main__":
+    bt = Bt()
+    bt.optstrategy(['profit', 'sharpe', 'max_drawdown'], (1., 1., 1.),
+                   opconfig=OptunaConfig(n_trials=10), op_method='optuna',
+                   len1=(5, 21, 1), len2=(10, 31, 1), a=(0.5, 3., 0.1))
+    bt.run()
+```
+
+信号级优化（`OptimizeConfig`：单/多目标、网格/Optuna、加权）：
+
+```python
+config = OptimizeConfig(
+    params={'length1': (5, 30, 2), 'length2': (30, 60, 2)},
+    target=['max_drawdown', 'sharpe', 'win_rate'],
+    weights=(-1.0, 3.0, 1.5),          # 回撤最小化、夏普与胜率最大化
+    method='optuna', config={'n_trials': 100, 'sampler': 'TPESampler'},
+)
+result = ind.signal_backtest(optimize=config)
+result.plot_optuna()
+```
+
+### 5. 自定义止损 `Stop`
+
+继承 `Stop`，实现 `long()/short()` 即可打造 ATR 动态止损等任意止损逻辑：
+
+```python
+class ATRDynamicStop(Stop):
+
+    def __init__(self, atr_length: int = 14, atr_mult: float = 1.0):
+        self.atr_length = atr_length
+        self.atr_mult = atr_mult
+        self.atr = self.kline.atr(self.atr_length)  
+
+    def long(self):
+        stop = self.low[-1] - self.atr_mult * self.atr[-1]
+        # 写入多头止损价
+        self.stop_price.new = stop
+        # 写入多头止盈价
+        self.target_price.new = self.kline.open_price + (self.kline.open_price - stop) * 2 
+    def short(self):
+        ...
+
+BtStop.ATRDynamicStop = ATRDynamicStop      # 注册后即可在策略中使用
+```
+
+### 6. 多周期 K 线
+
+`resample()` 一键切换周期，指标自动对齐（只适用于回测）：
+
+```python
+self.kline_1m = self.get_kline(LocalDatas.v2509_60)
+self.kline_5m = self.kline_1m.resample(300)   # 1分钟 → 5分钟
+self.ma_1m = self.kline_1m.close.sma(20)
+self.ma_5m = self.kline_5m.close.sma(20)()   # 上采样回主周期
+```
+
+### 7. 多策略加载 `addstrategy`
+
+支持策略类 / 模块名 / .py 路径 / 目录 / 包路径混合加载，并可传参：
+
+```python
+bt = Bt()
+bt.addstrategy('cci', 'cmo')                          # 模块名自动发现
+bt.addstrategy('./strategy/cci.py')                   # 文件路径
+bt.addstrategy('strategy')                            # 目录批量加载
+mystrategy= MyStrategy.copy(params=dict(symbol="l2609_60"))
+bt.addstrategy(mystrategy)  # 副本+参数
+bt.run(gui=Gui.Pylightcharts)
+```
+
+### 8. K 线回放 `replay`
+
+逐 K 线推进回测，直观复现实时交易过程：
+
+```python
+class ReplayStrategy(Strategy):
+    def __init__(self):
+        self.kline = self.get_kline(LocalDatas.test)
+        self.test = self.kline.tradingview.UT_Bot_Alerts()
+
+    def next(self):
+        if not self.kline.position:
+            if self.test.long_signal.new:
+                self.kline.buy(stop=BtStop.SegmentationTracking)
+            elif self.test.short_signal.new:
+                self.kline.sell(stop=BtStop.SegmentationTracking)
+
+if __name__ == "__main__":
+    Bt(replay=True).run(period_milliseconds=1000, gui=Gui.Pylightcharts)
+```
+
+### 9. 实盘交易（TQSDK）
+
+回测通过的策略，切换 `Bt(live=True)` 即可实盘，支持三种部署模式：
+
+```python
+bt = Bt(live=True)
+bt.addstrategy(CCIStrategy, CMOStrategy)
+bt.addTqapi(tq_auth=tq_auth(user_name="账号", password="密码"))
+
+bt.run()                                   # 模式一：pylightcharts 实时图表（原生窗口）
+# bt.run(isplot=False)                     # 模式二：后台串行（低资源）
+# bt.run(isplot=False, run_parallel=True)  # 模式三：多进程并行（互相隔离）
+```
+
+### 10. 机器学习 & 强化学习
+
+集成 ElegantRL 强化学习，策略一行配置即可训练：
+
+```python
+class RLStrategy(Strategy):
+    rl = True  # 开启强化学习
+    def __init__(self):
+        # 初始化指标特征
+        ...
+        # 配置强化学习模型
+        self.set_model_params(
+            agent=Agents.AgentDiscretePPO, if_discrete=True,
+            train=True, break_step=1e6, state_dim=..., action_dim=...,
+            auto_process_features=True,        # 自动处理指标特征
+        )
+
+    def reset(self):
+        # 重置强化学习模型
+        ...
+    
+    def step(self):
+        # 训练和测试强化学习模型
+        ...
+    # 训练 / 回测 / 实盘统一由 Bt 调度
+```
+
+## 🧩 VS Code 扩展：图表 + minibt desk（minibt-charts 0.3.11）
+
+图表也能像代码文件一样开在 **VS Code 编辑器页签**里（回测 / 回放 / 实时都行）。
+扩展**跟随策略里写的 gui**：`Gui.Bokeh` 用 bokeh（回放/实时是 bokeh server，
+回测是自包含 HTML 快照），`Gui.Pylightcharts` / `Gui.PylightchartsWeb` 用
+pylightcharts 网页版（本地 SSE + iframe 活图）—— 原生窗口嵌不进 VS Code，
+会被换成**同一个渲染器**的网页版，图形完全一致；`btplot(...)` 一样跟随。
 
 ```bash
-cd jslib && npm run build      # regenerate pylightcharts/js/*
-cd .. && python -m build       # sdist + wheel (JS assets are package-data)
-twine upload dist/*
+# 安装（在 minibt 仓库的 vscode-minibt/ 目录里打包，或下载现成的 .vsix）
+npx --yes @vscode/vsce package
+code --install-extension minibt-charts-0.3.11.vsix
 ```
 
-The built `pylightcharts/js/` files are committed on purpose so that
-`pip install` works without Node. Always run `npm run build` before committing.
+也可以直接从市场装：VS Code 扩展面板搜 **`MiniBT Charts`**，或
+[VS Marketplace](https://marketplace.visualstudio.com/items?itemName=MiniBtMaster.minibt-charts) /
+[Open VSX](https://open-vsx.org/extension/MiniBtMaster/minibt-charts)（VSCodium / Gitpod 等）。
 
-### Bridge rules
+装好后**不必先配解释器**（`0.3.6` 起会自动挑一个装了 `minibt` / `pylightcharts`
+的 Python：先看 `python.defaultInterpreterPath`，再试 `py -0p` 列出的各版本，
+最后 `python` / `python3`，选第一个依赖齐的；只在都不行时才提示安装缺失模块）。
+想固定某个解释器/工作目录时，再写工作区 `.vscode/settings.json`：
 
-- Fire-and-forget calls go through `Window.invoke` (the transport appends
-  `;undefined` so pywebview never serialises a live chart object).
-- Methods that **return an object** must use `store_as=...` or, for primitives,
-  `invoke_get`. Returning a live object through `invoke_get` would explode.
-- Round-trips are serialised and correlated by request id; JS errors raise
-  `pylightcharts.util.BridgeError` instead of returning `None`.
-- Chart and series share method names (`apply_options`); they are deliberately
-  kept apart (`series_options`, `data_points`) to avoid MRO shadowing.
-- Upgrading lightweight-charts: `npm pack lightweight-charts@X`, migrate the
-  breaking changes, `npm run build`, then run the e2e suite.
-
-### The generic bridge
-
-New features should not require touching TypeScript. Any method on any live
-chart object can be called from Python:
-
-```python
-chart._invoke('addSeries', 'Area', 'my area', {'lineWidth': 2}, handle)
-chart.win.invoke(f'{series.id}.series', 'applyOptions', {'lineWidth': 3})
+```jsonc
+{ "minibt.pythonPath": ".venv/Scripts/python.exe", "minibt.cwd": "${workspaceFolder}" }
 ```
 
-Handles are either registered via `Lib.register(...)` or dotted window paths
-(`window.abcdefgh.chart`). A `{'$ref': handle}` argument is resolved to the live
-JS object, so object-taking APIs work too:
-
-```python
-series.attach_primitive('myPrimitive')   # -> attachPrimitive({"$ref": "myPrimitive"})
-```
-
-See `jslib/src/general/rpc.ts`.
-
-### Full option coverage
-
-`apply_options(**kwargs)` accepts any option of the underlying API and converts
-`snake_case` keys to `camelCase` automatically:
-
-```python
-chart.apply_options(auto_size=True, localization={'price_format': {'precision': 4}})
-chart.time_scale_options(right_offset=5, bar_spacing=8)   # time scale
-series.apply_options(line_width=3, crosshair_marker_visible=False)
-get = chart.get_price_scale('left'); get.set_mode('logarithmic')
-```
-
-### Indicators
-
-Pure-pandas implementations, no extra dependencies. Overlays go on the price
-pane, oscillators get their own pane automatically:
-
-```python
-chart.add_sma('close', 20)
-chart.add_ema('close', 50, color='#2196F3')
-chart.add_bollinger('close', 20, 2)      # -> (upper, middle, lower)
-chart.add_donchian(20)
-chart.add_vwap()
-
-chart.add_rsi(14)                        # own pane + 70/30 guide lines
-chart.add_macd()                         # own pane -> (macd, signal, histogram)
-chart.add_stochastic()                   # own pane -> (%K, %D)
-chart.add_atr(14)
-chart.add_adx(14)                        # own pane -> (adx, +DI, -DI)
-chart.add_obv()                          # own pane (needs volume)
-chart.add_cci(20)
-chart.add_williams_r(14)
-chart.add_mfi(14)
-chart.add_roc(12)
-chart.add_keltner(20, 2.0)               # overlay -> (upper, middle, lower)
-```
-
-Raw values: `from pylightcharts import indicators; indicators.rsi(close, 14)`.
-RSI, OBV, CCI, %R, ROC, MFI and Bollinger match TA-Lib to floating-point
-precision; ATR and ADX match within ~1e-4 and ~0.1 respectively (Wilder
-accumulation rounding).
-
-#### Indicators follow the data
-
-Every indicator is recomputed automatically: a full re-send on `chart.set()`,
-and a single-point update on `chart.update(bar)` (recomputed from a warm-up
-window so recursive indicators stay numerically identical to a full run).
-`add_computed_series(compute, name, ...)` adds your own.
-
-#### Batching ticks
-
-Each bridge call is one webview round-trip, so wrap bursts in `chart.batch()`:
-
-```python
-with chart.batch():
-    for tick in ticks:
-        chart.update(tick)      # flushed as a single script
-```
-
-#### Conflation (very large data)
-
-Conflation is a plain series option, so the bridge already exposes it:
-
-```python
-chart.apply_options(enable_conflation=True, precompute_conflation_on_init=True)
-series.apply_options(enable_conflation=True)
-```
-
-### Custom series (declarative rendering)
-
-The tricky part of a custom series is `draw()`, which runs synchronously every
-frame - python cannot take part in that. So the protocol splits the work:
-**python computes the shapes once per data update, one generic JS renderer draws
-them every frame.**
-
-```python
-from pylightcharts import shapes
-
-series = chart.add_custom_series('range bars', pane_index='new')
-series.set(df, shapes=lambda row: shapes.range_bar(row['low'], row['high']))
-```
-
-Shape builders: `rect` `band` `line` `circle` `marker` `text` `polyline`, plus
-presets `range_bar` `box_plot` `error_bar` `stem`.
-
-`shapes.stem(price, baseline=0.0, style='dashed', cap=False)` draws a vertical
-stick from `baseline` to `price` - the easy way to show per-trade PnL, deviation
-from a mean, or volume-at-price as bars hanging off a common axis:
-
-```python
-series.set(df, shapes=lambda row: shapes.stem(row['pnl'], color=row['color'],
-                                              cap=True))
-``` Vertical anchors are prices,
-horizontal offsets are in bar units (`-0.4..0.4` spans a bar) - except
-`shapes.marker`, whose `offset`/`size` are **pixels** (zoom-invariant glyphs;
-`marker=` takes a minibt `Markers` name: `triangle` `inverted_triangle`
-`arrow_up` `arrow_down` `circle` `circle_cross` `circle_dot` `circle_x`
-`circle_y` `square` `dot` `dash` `cross` `asterisk` `triangle_dot`).
-
-```python
-shapes.box_plot(low, q1, median, q3, high)
-shapes.polyline([(0.0, 1.0), (0.4, 2.0)], fill_color='rgba(0,0,0,0.2)')
-shapes.text(price, 'label\nsecond line',   # multi-line (like bokeh's LabelSet)
-            offset_x=6, font_weight='bold',              # pixel offset / bold
-            background_color='#222', padding=4)         # label box + padding
-```
-
-Each data item may carry `value`, `low`, `high` (autoscale + last value),
-`color`, and `shapes`.
-
-### v5 plugins (markers / up-down markers / watermarks)
-
-v5 moved markers and watermarks to *primitives*; each has a full Python wrapper:
-
-```python
-m = series.markers_plugin()          # SeriesMarkersPlugin (ISeriesMarkersPluginApi)
-m.markers(); m.apply_options(z_index=1); m.detach(); m.get_series()
-
-up = series.up_down_markers_plugin(positive_color='#26a69a')
-up.set_data(df); up.update(point); up.markers(); up.set_markers([...])
-up.clear_markers(); up.apply_options(negative_color='#ef5350'); up.detach()
-
-text = chart.text_watermark_plugin('pylightcharts', 48, 'rgba(180,180,220,0.4)')
-text.apply_options(horz_align='left'); text.get_pane(); text.detach()
-
-img = chart.image_watermark_plugin('logo.png', max_width=120)
-```
-
-### Function-valued options (formatters & providers)
-
-Callbacks run synchronously inside the render loop, so register a small JS body
-and inject it at any option path:
-
-```python
-chart.register_js_callback('vol', ['price'], "return (price/1e6).toFixed(1)+'M'")
-chart.set_tick_mark_formatter('vol')            # timeScale.tickMarkFormatter
-
-series.set_price_format_formatter('vol')        # merge-safe priceFormat.formatter
-series.set_autoscale_info_provider('vol')       # series.autoscaleInfoProvider
-
-chart.set_option_callback(f'{chart.id}.chart', 'applyOptions',
-                          'localization.priceFormatter', 'vol')
-chart.set_price_formatter_callback('vol'); chart.set_time_formatter_callback('vol')
-```
-
-### Declarative primitives
-
-```python
-chart.register_js_callback(
-    'draw', ['target', 'pc', 'view', 'prim'],
-    "const y = prim.series.priceToCoordinate(100); /* draw with target.useBitmapCoordinateSpace */")
-prim = chart.create_series_primitive({
-    'paneViews': [{'draw': 'draw', 'zOrder': 'top'}],
-    'priceAxisViews': [{'coordinate': 'coord', 'text': 'label'}],
-    'hitTest': 'hit', 'autoscaleInfo': 'scale',
-})
-prim.attach_to(series)
-
-pane_prim = chart.create_pane_primitive({'paneViews': [{'draw': 'draw'}]})
-pane_prim.attach_to(chart, 0)
-```
-
-### Custom horizontal scale
-
-```python
-class MonthChart(Chart):
-    _horz_scale_name = 'month'
-    _horz_scale = {
-        'formatTickmark': (['tickMark', 'loc'], "return 'M' + tickMark"),
-        'formatHorzItem': (['item'], "return 'M' + item"),
-    }
-```
-
-### Constants & emulation checks
-
-```python
-from pylightcharts.constants import LineStyle, PriceScaleMode, CrosshairMode, verify
-chart.apply_options(crosshair={'mode': CrosshairMode.Magnet})
-chart.price_scale(mode=PriceScaleMode.Logarithmic)
-series.apply_options(line_style=LineStyle.Dashed)
-verify(chart)          # [] when the Python constants match the embedded engine
-```
-
-### Price lines, data readback, events
-
-```python
-line = series.create_price_line(105.0, color='#00e676', title='entry')
-line.apply_options(line_visible=False)
-line.remove()
-
-series.price_to_coordinate(105)        # <-> series.coordinate_to_price(y)
-series.data_by_index(10)               # individual bar
-series.data_points()                   # everything the chart holds
-series.pop(2); series.last_value_data(); series.bars_in_logical_range(0, 50)
-series.series_type(); series.get_pane_index()
-series.move_to_pane(2); series.series_order(); series.set_series_order(3)
-
-chart.scroll_to_real_time(); chart.scroll_to_position(3, animated=False)
-chart.reset_time_scale(); chart.set_visible_logical_range(0, 60)
-chart.get_visible_range(); chart.get_visible_logical_range()
-chart.time_to_coordinate(t); chart.coordinate_to_time(x)
-chart.logical_to_coordinate(l); chart.coordinate_to_logical(x)
-chart.pane_height(0); chart.set_pane_height(300, 0)
-chart.pane_stretch_factor(0); chart.pane_size(); chart.pane_series_count(0)
-chart.version(); chart.auto_size_active(); chart.remove()
-chart.set_crosshair_position(100.0, some_time); chart.clear_crosshair_position()
-
-chart.get_price_scale('right').get_visible_range()
-chart.get_price_scale('right').set_auto_scale(False)
-chart.pane_price_scale(0, 'left')
-
-chart.events.crosshair_move += handler      # handler(chart, time, price)
-chart.events.dblclick += handler
-chart.events.click.unsubscribe()
-```
-
-### Multi-chart sync
-
-```python
-price = Chart(); volume = Chart()
-price.sync(volume)                       # volume follows price pan/zoom
-price.sync(volume, crosshairs_only=True)
-```
-
-### Native panes (lightweight-charts v5)
-
-```python
-chart.add_pane()
-chart.create_area(name='close', pane_index=1)
-chart.add_series('Line', 'ma20', pane_index=1, color='#0ff')
-chart.set_pane_stretch(1, 1.5)
-chart.pane_count()
-```
-
-`pane_index='new'` creates a fresh pane, and passing an index beyond the
-current pane count creates the panes in between.
-
-### Drawing tools
-
-Trend line / horizontal line / vertical line / ray / box, plus:
-
-```python
-chart.fibonacci(t1, p1, t2, p2, levels=(0, 0.382, 0.5, 0.618, 1))
-chart.measure(t1, p1, t2, p2)                       # price %, bar count
-chart.parallel_channel(t1, p1, t2, p2, offset=5)    # second line 5 price units away
-chart.position(t1, entry, t2, target, risk_ratio=1.5)   # profit + stop zones
-chart.long_position(t1, entry, t2, target)          # aliases
-chart.short_position(t1, entry, t2, target)
-
-chart.andrews_pitchfork(t1, p1, t2, p2, t3, p3)     # 3 points
-chart.triangle(t1, p1, t2, p2, t3, p3)              # 3 points
-chart.fibonacci_extension(t1, p1, t2, p2, t3, p3)   # impulse + retracement
-chart.gann_fan(t1, p1, t2, p2)                      # 1x1 plus steeper/shallower rays
-```
-
-With `toolbox=True` these are also available interactively
-(Alt+F / M / C / P / A / G / X / N).
-
-### Numeric axes and formatters
-
-```python
-from pylightcharts import YieldCurveChart, OptionsChart
-
-curve = YieldCurveChart()                 # x axis = duration in months
-series = curve.add_series('Line', 'rate')
-series.set(pd.DataFrame({'time': [1, 3, 12], 'rate': [4.2, 4.0, 3.6]}))
-
-surface = OptionsChart()                  # x axis = strike
-
-chart.set_price_formatter(decimals=2, thousands=True, prefix='$')
-chart.set_time_formatter('YYYY-MM-DD HH:mm')
-chart.register_js_formatter('eur', "value => '\u20ac' + value.toFixed(2)")
-chart.set_price_formatter(name='eur')
-```
-
-### Large data
-
-DataFrames with 2000+ rows are transferred as a base64 column-major Float64
-buffer and rebuilt in the browser (`Lib.decodeData`) instead of being shipped as
-JavaScript source. Measured 100k bars: **1.56s -> 0.54s (~3x)**;
-500k bars: **8.9s -> 3.2s**. Tune with `pylightcharts.util.BINARY_DATA_THRESHOLD`.
-
-### Headless / server-side rendering
-
-```python
-from pylightcharts.headless import HeadlessChart
-
-chart = HeadlessChart(width=1200, height=700)
-chart.set(df)
-chart.add_sma('close', 20)
-chart.add_rsi(14)
-chart.render('report.png')        # PNG bytes, no window required
-chart.to_html()                   # or grab the standalone HTML
-```
-
-Uses Playwright when installed, otherwise a local Chrome/Edge in headless mode
-(`PYLIGHTCHARTS_CHROME` overrides the browser path).
-
-
-## pylightcharts extensions
-
-APIs that `pylightcharts` adds on top of the upstream Lightweight Charts /
-lightweight-charts-python surface. New additions are listed here (briefly) and
-documented in detail under `docs/`.
-
-| API | what it does |
-|---|---|
-| `legend_toggle=` / `legend=` on every series factory & indicator | draw the legend row, and its eye icon, or neither |
-| `chart.horizontal_span(low, high, color=, opacity=, filled=, pane_index=)` | shaded price band (support / resistance); `pane_index=` puts it in a sub-pane |
-| `chart.fill_between(upper, lower, color=, opacity=)` / `upper.fill_between(lower)` | fill the area between two series lines (band body) |
-| `opacity=` on `horizontal_span` / `fill_between` / `vertical_span` | fill alpha for any colour format, outline stays crisp |
-| `chart.pane_separator(color=, hover_color=, enable_resize=)` | restyle / hide the 1px divider between panes |
-| `chart.pane_height()` / `set_pane_height(px, i)` (wraps `IPaneApi`) | read / set a pane's absolute height |
-| `chart.mark_swings(...)` + `indicators.swing_points` | `length`-bar fractal swing highs / lows with their price as the marker text (Lightweight Charts itself only draws the markers) |
-| `chart.add_zigzag(threshold=)` + `indicators.zigzag` | 波段线: alternating pivots after a minimum percentage retracement, drawn as a line and kept in sync like an indicator (`include_unconfirmed` shows the still-open leg; `inverted=` for a flipped price scale) |
-| `BrowserChart` + `to_html()` / `save_html()` / `open_in_browser()` | one self-contained HTML page (engine + bridge + styles inlined) - `BrowserChart(...).show()` writes and opens it: browser view with no server, Node or extra dependency |
-| `BrowserChart(live=True)` + `LiveServer` | live chart in a browser tab: a stdlib HTTP + Server-Sent-Events stream (long-polling fallback, optional `token=` for LAN/phone viewing) carries every `set`/`update`/`apply_options` to the page and widget callbacks are posted back into Python - still zero dependencies, nothing written to disk |
-| `color_by(...)` / `series.color_by(...)` / `chart.color_by(...)` | per-point / conditional colours: fills the engine's `color` / `wickColor` / `borderColor` keys, for any series (indicator lines included) and the main candles (`docs/guide/charts.md#conditional-colours`) |
-| `Chart(..., keyboard=True, keyboard_step=0.1)` + arrow keys | built-in navigation: arrows move the visible window / zoom (zooming out keeps the right edge pinned once the newest bar is on screen), `Shift` big step, `Ctrl`+arrows & `PageUp/Down` a full page, `Home`/`End`, `Ctrl+0` to fit; user `hotkey()`s take precedence and typing is ignored |
-| `chart.win.page_topbar()` | a top bar that spans the window and stays above every chart (a `chart.topbar` lives inside one chart and shrinks with it) |
-| `chart.win.layout` (`Layout`) | tile the window with charts: `vertical()` / `horizontal()` / `arrange(kind, count)` / `single()`, independent by default (`sync=True` links pan/zoom/crosshair, `sync='crosshair'` only the crosshair), plus `on_create=` to feed new charts; draggable separators between the charts (`divider_size=` / `set_divider(...)`) |
-| `Layout.arrange_tiles(tiles, dividers=True)` + `Lib.clearLayoutTiles` | **2D tile layouts** (TradingView-style "top 1 / bottom 2"): `tiles` is an ordered list of `(width, height)` fractions - `[(1.0, 0.5), (0.5, 0.5), (0.5, 0.5)]`. A single column/row and a row-flow (2D) layout both get **draggable separators** between rows and between the columns of a row; switching back to a float layout (`arrange()` / `single()`) emits `clearLayoutTiles` and restores the normal float geometry (`examples/11_api_tour/24_layouts_and_legend_settings.py`) |
-| `series.enable_legend_settings(callback)` | add a **settings (gear) button** to a series' legend row; clicking it calls `callback(series, x, y)` (the click position inside the webview, so a settings card can pop up next to the legend). Replaces "watch every mouse move over the legend" with a single click round-trip |
-| `series.pin_legend_row(True)` | keep a series' legend row **always visible** (by default rows only appear while the crosshair is over a bar), so an indicator's name + eye + gear stay on screen |
-| `series.enable_legend_menu(config, callback)` | the **Qt-free** counterpart of `enable_legend_settings`: a self-contained JS menu on the gear button (`参数` / `线型` / `线宽` / `线颜色` / `其它设置`); each change calls `callback(series, kind, payload)` |
-| `series.remove_legend_row()` | remove a series' legend row outright (idempotent) — what `legend=False` now uses internally, since the JS side builds a row for every series |
-| `chart.enable_legend_collapse()` | the TradingView-style `∧` / `∨ N` collapse button below the indicator legend rows (hides itself when there are none) |
-| `chart.horizontal_line(..., text=, label_visible=, label_background_color=, label_text_color=, label_font=)` | draw the label **inside the pane** (pinned to the visible range's left edge); `axis_label_visible=False` now also stops the hidden badge from widening the price scale |
-| `series.remove_markers(ids)` + `marker(..., size=)` | remove many markers with one re-render, and pass the v5 marker `size` through |
-| `series.skip_gap_segments()` / `prefer_single_gap()` / `repaint_gaps()` | tune the NaN-break renderer: never split hidden `fill_between` carriers, prefer the single-series transparent-gap path for realtime lines, and re-send after a colour change |
-| `series.set_line_width` / `set_line_color` / `set_line_style` / `set_price_visible` / `is_visible` | runtime style/visibility helpers for indicator lines: line width, colour, dash style (`solid` / `dashed` / ...), the price line / price label flags (LWC `priceLineVisible` / `lastValueVisible`) and the last visibility set from Python |
-| `chart.remove()` | destroying a chart now also removes its `.handler` DOM wrapper (`Handler.destroy`); previously only the engine was disposed and the leftover box kept its old size / position and covered the charts created next |
-| `series.delete()` + `chart.remove_pane(index)` | remove a series and, when it was the last one in its pane, the pane with it: the legend row (label + eye) goes away and the later panes (and their `series.pane_index`) shift up - so an indicator sub-chart can be swapped at runtime (`examples/11_api_tour/19_indicator_panes.py`) |
-| `chart.win.theme('light'\|'dark')` + `pylightcharts.themes` | whole-UI theme in one call: root CSS variables (top bar, legend, menus), the legend text colour and its eye icon and, on every chart, background / grid / crosshair / candles / volume / separator / scale colours - later charts inherit it, existing tables are recoloured too and any single setter still overrides it (`docs/guide/options.md#themes-whole-ui-light-dark`) |
-| `chart.infinite_history(loader, page=, threshold=)` + `pylightcharts.history` | the official infinite-history demo: the chart's own `events.range_change` (`barsInLogicalRange().barsBefore`) asks `loader(count[, before])` for older bars, which are prepended so the viewport stays put - indicators (main pane and sub-panes) extend with them, volume is re-sent and the drawings are kept (`docs/guide/infinite-history.md`) |
-| `chart.add_symbol(name, data, kind=, scale=, margins=, ...)` + `chart.scale_margins(right=, left=)` | the official tutorial's two price scales with the main candles kept on the right axis: overlay a second symbol as candles / bars / line / area / baseline / histogram on the left one (or overlap-stack them with margins), with the symbol on the price line label (`docs/guide/two-price-scales.md`) |
-| `series.tracking_tooltip(...)` / `series.magnifier_tooltip(...)` (+ `chart.` for the main series) | the official tutorial's two crosshair tooltips in one call - a box that follows the cursor (flipping near the edges) or a translucent band pinned to the top of the pane; `title=` / `fields='auto'` (OHLC) / `field_labels=` / `decimals=` / `time_format=` / `color_by_candle=` / size and colour options, `hide()`/`show()`/`set_mode()`/`remove()`; background/text follow the theme's CSS variables while the title and frame use the series colour (`docs/guide/tooltips.md`) |
-| `Table.set_colors(background_color=, border_color=, text_color=, section_color=)` | restyle a floating table after it was built (the constructor paints the colours into the DOM, so this is what `Window.theme` uses on existing tables) |
-| `Table.set_position(position='top-right', margin_x=, margin_y=)` | anchor a floating table to any of the four corners and inset it from the nearest two edges - the same two keywords are accepted by `create_table(...)`/`chart.create_table(...)` (`docs/guide/table.md`) |
-| `Chart(..., attribution_logo=True)` | per-window TradingView logo (off by default) |
-| `pylightcharts.compat.install_alias()` | run `lightweight_charts` code unchanged |
-| `chart.register_js_callback` + `create_series_primitive` / `create_pane_primitive` | declarative v5 primitives from Python |
-| `chart.set_price_formatter` / `set_time_formatter` | declarative tick formatters (`Lib.resolveFormatter`) |
-| `add_custom_series(spec={...})` + `view.visibleBars()` / `scope.mediaSize.width` - **Volume Profile recipe** | build a horizontal volume distribution on the declarative custom-series API: the 0-line is pinned to the **right edge of the visible pane** (`scope.mediaSize.width`, flush with the volume bars), the values follow the crosshair (nearest `bar.x`), and `series.applyOptions({})` forces the repaint - a crosshair move does **not** re-run `rendererDraw` on its own. Works overlaid on the main pane (price bins) or in its own pane (bin indices, layered histogram) - `examples/11_api_tour/26_volume_profile.py` (static) and `27_volume_profile_live.py` (live, with *realtime update beats mouse-follow* ordering) |
-
-Per-point / conditional colours (colour a bar, candle or histogram value by any
-condition) are a Lightweight Charts feature driven from the data - see
-[Charts and data](https://github.com/MiniBtMaster/pylightcharts/blob/main/docs/guide/charts.md#conditional-colours).
+| 命令（`Ctrl+Shift+P` 搜 `MiniBT`） | 快捷键 | 作用 |
+| --- | --- | --- |
+| `在编辑器页运行策略图表` | `Ctrl+Alt+M` | 图表开在编辑器页签，实时/回放会持续刷新 |
+| `显示策略日志（带进度）` | `Ctrl+Alt+L` | 日志页签，带进度条（认 `进度 x/y`、`xx%`） |
+| `停止策略进程` / `刷新图表` | — | 结束子进程 / 重新加载图表 |
+| `在浏览器中打开图表` | — | 用系统浏览器打开同一张图 |
+| `MiniBT: 打开 MiniBT 看盘终端` | `Ctrl+Alt+D` | 在编辑器页打开 minibt desk（0.3.11 新增） |
+| `MiniBT: 设置天勤密码（加密存储）` | — | 密码写入 VS Code `SecretStorage`，不写 settings.json |
+| `MiniBT: 停止看盘终端` / `显示看盘日志` | — | 停止 desk 子进程 / 查看启动日志 |
+
+编辑器标题栏里还会出现一个 **MiniBT 快速按钮**（K 线图标）—— 和 Pi Agent
+Studio 一样，就排在 VS Code 原生「运行 ▾」按钮右边的**同一行**里，任何文件
+都能看到，点它直接运行当前策略。
+
+### minibt-charts 0.3.11：把 desk 开进 VS Code
+
+0.3.11 新增 **「打开 MiniBT 看盘终端」**：扩展会启动
+`python -m minibt desk --browser --json`，等待本地服务 `/healthz` 就绪后把
+desk 页面嵌进编辑器页签。它和「在编辑器页运行策略图表」使用同一套
+子进程 + 本地服务 + iframe 机制，不需要把 PyQt 窗口塞进 VS Code。
+
+- **入口**：编辑器标题栏 🕯 图标 / 命令面板 / 状态栏「MiniBT 看盘」/ `Ctrl+Alt+D`；
+- **启动体检**：有天勤账号 + 密码 → 期货 + 股票；没有天勤但 FutuOpenD 通 →
+  只连股票；都没有 → 弹窗选择【输入天勤账号】【只连 Futu 股票】【进入离线演示】；
+- **密码安全**：优先使用 VS Code `SecretStorage`，其次 `MINIBT_TQ_PASSWORD`，
+  最后才是 `settings.json`；传给子进程走环境变量，不出现在命令行 / `ps` 里；
+- **配置项**：`minibt.desk.account` / `password` / `futuHost` / `futuPort` /
+  `stocks` / `offline` / `theme` / `autoStart` / `port`，全部有默认值；
+- **状态栏**：点「MiniBT 看盘」可启动 / 停止常驻 desk；
+- **修复**：浏览器壳 SSE 订阅、`/desk.js` 静态资源 404、VS Code 内不再弹系统浏览器、
+  本地开发优先使用工作区里的 minibt 源码。
+
+> ⚠️ **纯 pylightcharts 原生窗口无法嵌入 VS Code** —— 它是 PyQt6 + WebView2 的
+> 独立操作系统窗口。扩展用的是**同一个渲染器**的网页版，图形完全一致；
+> 需要原生窗口时照旧直接运行策略即可。
+
+详见 [图表引擎与九种运行模式](https://www.minibt.cn/minibt_basic/1.29minibt_chart_modes/)
+的「九、在 VS Code 里看图表」一节。
+
+## 🔬 更多示例
+
+完整示例见 [`tutorials/`](https://github.com/MiniBtMaster/minibt/tree/main/tutorials) 目录：
+
+| 功能                                            | 示例文件                                 |
+| ----------------------------------------------- | ---------------------------------------- |
+| 信号回测与止损止盈（20 种组合）                 | `basic/signal_stop.py`                   |
+| 信号级参数优化（网格/Optuna）                   | `basic/signal_optimize.py`               |
+| 策略级参数优化                                  | `basic/optstrategy.py`                   |
+| 自定义止损（ATR 动态止损）                      | `basic/stop.py`、`basic/stop_params.py`  |
+| K 线回放                                        | `basic/strategy_replay.py`               |
+| 实盘三种模式                                    | `basic/live_trading_modes.py`、`basic/live_chart.py` |
+| 多策略加载                                      | `basic/load_strategies_from_dir.py`      |
+| 指标交易逻辑                                    | `basic/indicator_step.py`                |
+| 多指标策略                                      | `basic/multi_indicator_strategies.py`    |
+| 经典策略库（CCI/RSI/Hull/VPT/随机森林等 17 个） | `strategies/`                            |
+| 指标体系（12 个门面 / 自定义 / 字段 / 解包 / 回测 / 性能 / 共享副图） | `tutorials/indicators/`（见 `tutorials/indicators/README.md`） |
+
+## 📚 相关资源
+
+- **在线教程**：[https://www.minibt.cn](https://www.minibt.cn)
+- **更新日志**：[包内 CHANGELOG](CHANGELOG.md) · [官网](https://www.minibt.cn/changelog/)
+- **发布说明**：[1.3.4 RELEASE_NOTES](RELEASE_NOTES.md)
+- **GitHub**：[https://github.com/MiniBtMaster/minibt](https://github.com/MiniBtMaster/minibt)
+- **PyPI**：[https://pypi.org/project/minibt/](https://pypi.org/project/minibt/)
+- **作者**: owen | **邮箱**: 407841129@qq.com
+
+## 📄 许可证
+
+本项目采用 [MIT](https://github.com/MiniBtMaster/minibt/blob/main/LICENSE) 许可证。

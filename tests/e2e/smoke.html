@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>pylightcharts smoke</title>
+  <link rel="stylesheet" href="../../pylightcharts/js/styles.css">
+  <script src="../../pylightcharts/js/lightweight-charts.js"></script>
+</head>
+<body>
+  <div id="container"></div>
+  <pre id="result">PENDING</pre>
+  <script src="../../pylightcharts/js/bundle.js"></script>
+  <script>
+  (function () {
+    const log = [];
+    try {
+      // --- engine presence ---
+      log.push('LWCv:' + (window.LightweightCharts && window.LightweightCharts.version
+        ? window.LightweightCharts.version() : '?'));
+      log.push('globalCandleSeries:' + !!(window.LightweightCharts && window.LightweightCharts.CandlestickSeries));
+      log.push('globalCreateTextWatermark:' + !!(window.LightweightCharts && window.LightweightCharts.createTextWatermark));
+      log.push('globalCreateSeriesMarkers:' + !!(window.LightweightCharts && window.LightweightCharts.createSeriesMarkers));
+      log.push('Lib:' + (typeof Lib));
+
+      // --- v5 chart construction via our bridge ---
+      const h = new Lib.Handler('c1', 1.0, 1.0, 'left', false);
+      log.push('handler:' + !!h.chart);
+
+      const data = [];
+      for (let i = 0; i < 120; i++) {
+        const t = 1600000000 + i * 86400;
+        const o = 100 + Math.sin(i / 5) * 10;
+        data.push({ time: t, open: o, high: o + 3, low: o - 3, close: o + (i % 2 ? 1 : -1) });
+      }
+      h.series.setData(data);
+      h.volumeSeries.setData(data.map(d => ({ time: d.time, value: Math.round(d.high * 100), color: '#26a69a' })));
+      log.push('candles+volume:ok');
+
+      // --- v5 markers (migrated from series.setMarkers) ---
+      Lib.Handler.setMarkers(h.series, [
+        { time: data[10].time, position: 'aboveBar', color: '#2196F3', shape: 'arrowDown', text: 'M' }
+      ]);
+      log.push('markers:ok');
+
+      // --- v5 watermark (migrated from layout option) ---
+      h.setWatermark('SMOKE', 44, 'rgba(180,180,200,0.5)');
+      log.push('watermark:ok');
+
+      // --- v5 addSeries for a line ---
+      const line = h.createLineSeries('line1', { color: '#ff0000', lineWidth: 2 });
+      line.series.setData(data.map(d => ({ time: d.time, value: d.close })));
+      log.push('lineSeries:ok');
+
+      // --- Phase 1: generic bridge (Lib.invoke) ---
+      Lib.register('testchart', h);
+      const wrapper = Lib.invoke('testchart', 'addSeries',
+        ['Area', 'area1', { lineColor: '#00e676', topColor: 'rgba(0,230,118,0.35)', lineWidth: 2 }, 'area1']);
+      log.push('invoke.addSeries:' + !!(wrapper && wrapper.series));
+      wrapper.series.setData(data.map(d => ({ time: d.time, value: d.close + 5 })));
+      log.push('invoke.subpathLookup:' + (Lib.lookup('area1.series') === wrapper.series));
+      Lib.invoke('area1.series', 'applyOptions', [{ lineWidth: 3 }]);
+      log.push('invoke.applyOptions:' + (wrapper.series.options().lineWidth === 3));
+      Lib.invoke('testchart', 'removeSeries', [{ $ref: 'area1' }]);
+      log.push('invoke.removeSeries+$ref:ok');
+
+      // --- Phase 2: native panes ---
+      h.chart.addPane();
+      log.push('addPane.count:' + h.chart.panes().length);
+      const paneLine = Lib.invoke('testchart', 'addSeries',
+        ['Line', 'paneLine', { color: '#00ffff' }, 'paneLine', 1]);
+      paneLine.series.setData(data.map(d => ({ time: d.time, value: d.close * 1.5 })));
+      log.push('pane1.series:' + h.chart.panes()[1].getSeries().length);
+      log.push('paneIndex:' + paneLine.series.getPane().paneIndex());
+
+      // --- Phase 2: v5 up/down markers plugin ---
+      const udm = Lib.invoke('testchart', 'createUpDownMarkers', [
+        { $ref: 'paneLine.series' },
+        { positiveColor: '#26a69a', negativeColor: '#ef5350', updateVisibilityDuration: 0 },
+        'udm']);
+      log.push('upDownMarkers:' + !!udm);
+
+      // --- Phase 3: new drawing primitives ---
+      const a1 = { time: data[20].time, logical: 20, price: 100 };
+      const a2 = { time: data[80].time, logical: 80, price: 120 };
+      const fib = new Lib.FibonacciRetracement(a1, a2, { levels: [0, 0.382, 0.5, 0.618, 1] });
+      const meas = new Lib.Measure(a1, a2);
+      const chan = new Lib.ParallelChannel(a1, a2, { channelOffset: 5 });
+      const pos = new Lib.Position(a1, { time: data[80].time, logical: 80, price: 135 }, { riskRatio: 1.5 });
+      h.series.attachPrimitive(fib);
+      h.series.attachPrimitive(meas);
+      h.series.attachPrimitive(chan);
+      h.series.attachPrimitive(pos);
+      const a3 = { time: data[110].time, logical: 110, price: 95 };
+      const fork = new Lib.AndrewsPitchfork(a1, a2, a3);
+      const tri = new Lib.Triangle(a1, a2, { time: data[110].time, logical: 110, price: 130 });
+      h.series.attachPrimitive(fork);
+      h.series.attachPrimitive(tri);
+      const fibExt = new Lib.FibonacciExtension(a1, a2, a3);
+      const gann = new Lib.GannFan(a1, a2, { extension: 2, showLabels: true });
+      h.series.attachPrimitive(fibExt);
+      h.series.attachPrimitive(gann);
+      log.push('drawings.fib:' + !!fib + ' measure:' + !!meas + ' channel:' + !!chan
+        + ' position:' + !!pos + ' pitchfork:' + !!fork + ' triangle:' + !!tri
+        + ' fibExt:' + !!fibExt + ' gann:' + !!gann);
+
+      // --- Phase 3: binary data decode (Lib.decodeData) ---
+      function toBase64(f64) {
+        const bytes = new Uint8Array(f64.buffer);
+        let s = '';
+        for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+        return btoa(s);
+      }
+      // column-major: time=[1,2,3], close=[10.5, NaN, 12.5]
+      const floats = new Float64Array([1, 2, 3, 10.5, NaN, 12.5]);
+      const decoded = Lib.decodeData(toBase64(floats), ['time', 'close'], { color: ['#a', '#b', '#c'] });
+      log.push('decodeData:' + (decoded.length === 3
+        && decoded[0].time === 1 && decoded[2].close === 12.5
+        && !('close' in decoded[1])          // NaN becomes whitespace
+        && decoded[1].color === '#b'));
+
+      // --- Custom series: declarative shapes drawn by the generic renderer ---
+      const custom = h.createCustomSeries('custom ranges', {}, 'customSeries');
+      custom.series.setData(data.map(d => ({
+        time: d.time, low: d.low, high: d.high, value: d.close,
+        shapes: [
+          { type: 'rect', from: d.low, to: d.high, left: -0.35, right: 0.35,
+            fillColor: 'rgba(255,152,0,0.45)', borderColor: '#FF9800', borderWidth: 1 },
+          { type: 'circle', price: d.close, radius: 2, color: '#FF9800' },
+        ],
+      })));
+      log.push('customSeries:' + !!(custom.series && custom.paneView));
+
+      // --- table header cells must be boxed like the body cells ---
+      const tbl = new Lib.Table(200, 80, ['A', 'B'], [0.5, 0.5], ['left', 'right'],
+        'left', true, '#121417', '#FF0000', 1, [], []);
+      tbl.newRow(1, false);
+      tbl.updateCell(1, 'A', 'one');
+      const sides = (el) => ['Top', 'Right', 'Bottom', 'Left']
+        .map(side => getComputedStyle(el)['border' + side + 'Width']).join(',');
+      log.push('tableHeaderBorder:' + (sides(tbl._div.querySelector('th'))
+        === sides(tbl._div.querySelector('td'))));
+      tbl._div.remove();
+
+      // --- page-level top bar spans the window, charts are sized under it ---
+      const pageBar = Lib.createPageTopBar();
+      pageBar.makeTextBoxWidget('PAGE', 'left', null);
+      const barRect = pageBar._div.getBoundingClientRect();
+      const holder = document.getElementById('container');
+      const bg1 = new Lib.Handler('pg1', 0.5, 0.3, 'left', false);
+      const bg2 = new Lib.Handler('pg2', 0.5, 0.3, 'left', false);
+      const w1 = bg1.wrapper.getBoundingClientRect();
+      const w2 = bg2.wrapper.getBoundingClientRect();
+      log.push('pageTopBar:' + (
+        barRect.top >= 0 && barRect.width >= window.innerWidth - 24
+        && pageBar._div.parentNode === holder
+        && holder.firstElementChild === pageBar._div
+        && pageBar._page === true
+        // both charts are as tall as (window - bar) * f, i.e. sized in px
+        // against the space left by the bar, not as a % of the window
+        && Math.abs(w1.height - (window.innerHeight - barRect.height) * 0.3) < 2
+        && Math.abs(w2.height - (window.innerHeight - barRect.height) * 0.3) < 2
+        && w1.top >= barRect.bottom - 1 && Math.abs(w1.top - w2.top) < 1
+        && Math.abs(w2.left - (w1.left + w1.width)) < 2));
+
+      // --- legend rows: swatch + name even without a `value` ------------
+      // (a custom series built from range shapes only carries low/high; the row
+      // used to abort the whole legend update and show nothing but the eye)
+      h.legend.linesEnabled = true;
+      const csOne = h.createCustomSeries('range one', {}, 'csOne');
+      const csTwo = h.createCustomSeries('range two', {}, 'csTwo');
+      const areaRow = h.addSeries('Area', 'area row',
+        { lineColor: '#26A69A' }, 'areaRow');
+      const rowOf = (name) => h.legend._lines.find((r) => r.name === name);
+      h.legend.legendHandler({ time: 1, seriesData: new Map([
+        [csOne.series, { low: 1.5, high: 3.5 }],
+        [csTwo.series, { low: 2, high: 4 }]]) });
+      const htmlOne = rowOf('range one').div.innerHTML;
+      const htmlTwo = rowOf('range two').div.innerHTML;
+      log.push('legendCustomRow:' + (
+        htmlOne.includes('range one') && htmlOne.includes('1.50')
+        && htmlOne.includes('3.50')
+        // the second row proves the update no longer stops at the first
+        // value-less series
+        && htmlTwo.includes('range two') && htmlTwo.includes('4.00')
+        // area series carry their colour in `lineColor`, not `color`
+        && rowOf('area row').solid === '#26A69A'
+        && htmlOne.includes(rowOf('range one').solid)));
+
+      // --- the eye icon uses `currentColor`: it has to match the legend text
+      // (a hard-coded white eye is invisible on a light background) ---
+      h.legend.div.style.color = '#131722';
+      const eyePath = h.div.querySelector('.legend-toggle-switch svg path');
+      const eyeStroke = eyePath ? getComputedStyle(eyePath).stroke : '';
+      log.push('legendEyeColor:' + (
+        eyeStroke !== '' && eyeStroke.indexOf('255, 255, 255') === -1
+        && eyeStroke.replace(/\s/g, '') === 'rgb(19,23,34)'));
+
+      // --- chart sync: links replace each other and can be dropped ---
+      const listeners = (x) => x._crosshairListeners.length;
+      const syncBase = listeners(bg1);
+      Lib.Handler.syncCharts(bg2, bg1, true);        // crosshair only
+      const syncOnce = listeners(bg1) === syncBase + 1;
+      Lib.Handler.syncCharts(bg2, bg1, true);        // again: replaces
+      const syncReplaced = listeners(bg1) === syncBase + 1;
+      Lib.Handler.unsyncCharts(bg2, bg1);            // and is undoable
+      log.push('chartSync:' + (syncOnce && syncReplaced
+        && listeners(bg1) === syncBase));
+
+      // --- the first chart keeps the keyboard focus until it is hovered ---
+      // (a subchart created later used to steal it, so the arrows drove the
+      // small floating chart instead of the main one)
+      const firstFocus = window.handlerInFocus;
+      const extra = new Lib.Handler('kb-extra', 0.3, 0.3, 'left', false);
+      const keptFocus = window.handlerInFocus === firstFocus;
+      extra.wrapper.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+      const stoleFocus = window.handlerInFocus === extra.id;
+      window.handlerInFocus = firstFocus;
+      extra.chart.remove();
+      extra.wrapper.remove();
+      log.push('keyboardFocus:' + (firstFocus === h.id && keptFocus
+        && stoleFocus));
+
+      // --- keyboard navigation: pan / zoom / page / home / end ---
+      // The engine applies these on the next frame, so the handler's calls are
+      // spied on: every press reads the visible range once and then writes a new
+      // one, which makes the expected values exact even without waiting.
+      window.handlerInFocus = h.id;
+      const ts = h.chart.timeScale();
+      const seen = {ranges: [], bases: [], fit: 0, realTime: 0};
+      const realRange = ts.setVisibleLogicalRange.bind(ts);
+      const realGet = ts.getVisibleLogicalRange.bind(ts);
+      const realFit = ts.fitContent.bind(ts);
+      const realTime = ts.scrollToRealTime.bind(ts);
+      ts.setVisibleLogicalRange = (r) => {
+        seen.ranges.push({from: r.from, to: r.to});
+        return realRange(r);
+      };
+      ts.getVisibleLogicalRange = () => {
+        const r = realGet();
+        seen.bases.push({from: r.from, to: r.to});
+        return r;
+      };
+      ts.fitContent = () => { seen.fit++; return realFit(); };
+      ts.scrollToRealTime = () => { seen.realTime++; return realTime(); };
+      const press = (key, opts) => {
+        const e = new KeyboardEvent('keydown', Object.assign(
+          {key: key, bubbles: true, cancelable: true}, opts || {}));
+        document.dispatchEvent(e);
+        return e.defaultPrevented;
+      };
+      h.keyboardStep = 0.2;                    // exercises the python knob
+      const step = 0.2;
+      const left = press('ArrowLeft');
+      const right = press('ArrowRight');
+      const shiftLeft = press('ArrowLeft', {shiftKey: true});
+      const up = press('ArrowUp');
+      const down = press('ArrowDown');
+      const ctrlLeft = press('ArrowLeft', {ctrlKey: true});
+      const home = press('Home');
+      const pageDown = press('PageDown');
+      const end = press('End');
+      const fit = press('0', {ctrlKey: true});
+      // a user hotkey on ArrowUp must take the key away from the built-in
+      h.commandFunctions.unshift((e) => e.key === 'ArrowUp');
+      const hijacked = press('ArrowUp');
+      h.commandFunctions.shift();
+      h.keyboardStep = 0.1;
+
+      const near = (a, b) => Math.abs(a - b) < 1.5;
+      const span = (r) => r.to - r.from;
+      const mid = (r) => (r.from + r.to) / 2;
+      // one basis per press that reads the range (fit/End short-circuit: End reads)
+      const [bLeft, bRight, bShift, bUp, bDown, bCtrl, bHome, bPage, bEnd]
+        = seen.bases;
+      const [panLeft, panRight, panBig, zoomIn, zoomOut,
+             pageLeft, goHome, pageFwd] = seen.ranges;
+      const jump = (base, fraction) =>
+        Math.max(1, Math.round(span(base) * fraction));
+      log.push('arrowKeys:' + (left && right && shiftLeft && up && down
+        && ctrlLeft && home && pageDown && end && fit && !hijacked
+        && seen.ranges.length === 8 && seen.bases.length === 9
+        && seen.fit === 1 && seen.realTime === 1
+        // ArrowLeft moves the window to older bars, keeping its width
+        && near(panLeft.from, bLeft.from - jump(bLeft, step))
+        && near(span(panLeft), span(bLeft))
+        && near(panRight.from, bRight.from + jump(bRight, step))
+        // Shift is one near-full page
+        && near(panBig.from, bShift.from - jump(bShift, 0.9))
+        && near(span(panBig), span(bShift))
+        // Up zooms around the middle (both edges move inwards) ...
+        && near(span(zoomIn), span(bUp) / (1 + step))
+        && near(mid(zoomIn), mid(bUp))
+        // ... and Down zooms out, but the newest bar is on screen here, so the
+        // right edge stays where it is and the width goes to the older side
+        && near(span(zoomOut), span(bDown) * (1 + step))
+        && near(zoomOut.to, bDown.to)
+        && near(zoomOut.from, bDown.to - span(zoomOut))
+        // Ctrl+arrow and PageDown move a full window
+        && near(pageLeft.from, bCtrl.from - jump(bCtrl, 1))
+        && near(span(pageLeft), span(bCtrl))
+        && near(pageFwd.from, bPage.from + jump(bPage, 1))
+        // Home puts the first bar at the left edge, End goes to real time
+        && near(goHome.from, 0) && near(span(goHome), span(bHome))
+        && seen.realTime === 1));
+
+      // --- layout dividers sit between the charts and can be dragged ---
+      const total = () => Math.round(bg1.wrapper.getBoundingClientRect().width
+        + bg2.wrapper.getBoundingClientRect().width + 6);
+      Lib.setLayoutDividers('smoke-layout', [bg1, bg2], 'horizontal', 6,
+        '#2a2e39', '#2962FF');
+      const layoutDiv = holder.querySelector('.layout-divider');
+      const widthBefore = bg1.wrapper.getBoundingClientRect().width;
+      if (layoutDiv) {
+        const r = layoutDiv.getBoundingClientRect();
+        const x = r.left + r.width / 2, y = r.top + r.height / 2;
+        layoutDiv.dispatchEvent(new MouseEvent('mousedown', {bubbles: true,
+          clientX: x, clientY: y}));
+        document.dispatchEvent(new MouseEvent('mousemove', {bubbles: true,
+          clientX: x + 100, clientY: y}));
+        document.dispatchEvent(new MouseEvent('mouseup', {bubbles: true,
+          clientX: x + 100, clientY: y}));
+      }
+      const widthAfter = bg1.wrapper.getBoundingClientRect().width;
+      log.push('layoutDivider:' + (!!layoutDiv && layoutDiv.parentNode === holder
+        && total() === holder.clientWidth
+        && widthAfter > widthBefore + 80));
+      Lib.setLayoutDividers('smoke-layout', [bg1, bg2], 'horizontal', 0, '', '');
+      log.push('layoutDividerOff:'
+        + (holder.querySelectorAll('.layout-divider').length === 0));
+
+      // --- deleting a series drops its legend row (swatch + name + eye) ---
+      const legendRows = () => h.div.querySelectorAll('.series-container > div').length;
+      const rowsBefore = legendRows();
+      h.addSeries('Line', 'legend temp', { color: '#f0b90b' }, 'legendTemp');
+      const rowsAdded = legendRows();
+      Lib.invoke('testchart', 'removeSeries', [{ $ref: 'legendTemp' }]);
+      log.push('legendRowOnDelete:'
+        + (rowsAdded === rowsBefore + 1 && legendRows() === rowsBefore));
+
+      // --- numeric-horizontal-axis charts (kind = yield-curve / options) ---
+      const yc = new Lib.Handler('yc', 0.5, 0.5, 'left', false, 'yield-curve');
+      const ycSeries = yc.addSeries('Line', 'curve', { color: '#00e676' }, 'ycSeries');
+      Lib.lookup('ycSeries').series.setData([
+        { time: 1, value: 4.2 }, { time: 3, value: 4.0 }, { time: 12, value: 3.6 },
+      ]);
+      log.push('yieldCurve:' + !!(ycSeries.series && yc.chart.addSeries && !yc.series));
+
+      const oc = new Lib.Handler('oc', 0.5, 0.5, 'left', false, 'options');
+      const ocSeries = oc.addSeries('Line', 'iv', { color: '#ff9800' }, 'ocSeries');
+      Lib.lookup('ocSeries').series.setData([
+        { time: 90, value: 0.30 }, { time: 100, value: 0.22 }, { time: 110, value: 0.35 },
+      ]);
+      log.push('optionsChart:' + !!(ocSeries.series && !oc.series));
+
+      // --- declarative formatters (number + time) ---
+      const fmtNumber = Lib.makeNumberFormatter({ decimals: 2, thousands: true, prefix: '$' });
+      const fmtTime = Lib.makeTimeFormatter({ template: 'YYYY-MM-DD HH:mm' });
+      h.setPriceFormatter({ decimals: 2, thousands: true, prefix: '$' });
+      h.setTimeFormatter({ template: 'YYYY-MM-DD' });
+      log.push('formatters:' + (fmtNumber(1234567.891) === '$1,234,567.89'
+        && fmtTime(Date.UTC(2024, 0, 2, 3, 4) / 1000) === '2024-01-02 03:04'
+        && Lib.makeNumberFormatter({ compact: true })(12345) === '12.3K'));
+
+      log.push('horzScaleHook:' + (typeof Lib.registerHorzScaleBehavior === 'function'
+        && typeof Lib.lookupHorzScaleBehavior === 'function'));
+
+      // --- v5 panes API ---
+      log.push('panes:' + h.chart.panes().length);
+
+      // --- crosshair tooltips: the tutorial's tracking + magnifier ones ---
+      const tipSeries = h.addSeries('Line', 'tip', { color: '#2962FF' }, 'tipSeries');
+      tipSeries.series.setData([
+        { time: 1600000000, value: 100 },
+        { time: 1600086400, value: 42.5 },
+        { time: 1600172800, value: 130 },
+      ]);
+      const tipData = { time: 1600086400, value: 42.5 };
+      const containerRect = h.div.getBoundingClientRect();
+      const paneRect = h.chart.panes()[0].getHTMLElement().getBoundingClientRect();
+      const paneLeft = Math.round(paneRect.left - containerRect.left);
+      const paneTop = Math.round(paneRect.top - containerRect.top);
+      const paneWidth = Math.round(paneRect.width);
+      // a real pointer move cannot be faked reliably in a headless run, so the
+      // synthetic param goes straight into the handler's dispatch slot
+      const hover = (point) => h._dispatchCrosshair({
+        point,
+        time: point ? tipData.time : undefined,
+        seriesData: new Map([[tipSeries.series, tipData]]),
+      });
+      const tracking = h.createTooltip(tipSeries.series,
+        { mode: 'tracking', title: 'TIP', margin: 15, width: 96,
+          fields: ['value'], showTime: true }, 'tipTracking');
+      hover({ x: 100, y: 120 });
+      // the box has to fit its content: a fixed height used to cut the bottom
+      // line off (the border and half of the text were missing)
+      const fits = tracking.div.scrollHeight <= tracking.div.offsetHeight + 1
+        && tracking.div.offsetHeight > 0;
+      // the frame has to be complete on all four sides (the bottom edge used
+      // to be dropped by the border shorthand reset)
+      const tipStyle = getComputedStyle(tracking.div);
+      const framed = tipStyle.borderTopWidth === '1px'
+        && tipStyle.borderBottomWidth === '1px'
+        && tipStyle.borderLeftWidth === '1px'
+        && tipStyle.borderRightWidth === '1px'
+        && tipStyle.borderBottomStyle === 'solid'
+        && tipStyle.borderBottomColor === tipStyle.borderTopColor;
+      const trackingOk = tracking.div.style.display === 'block'
+        && tracking.div.textContent.indexOf('TIP') === 0
+        && tracking.div.textContent.indexOf('42.5') !== -1
+        && parseFloat(tracking.div.style.left) === paneLeft + 115
+        && parseFloat(tracking.div.style.top) === paneTop + 135
+        && fits && framed;
+      // near the right edge the box flips to the other side of the cursor
+      hover({ x: paneWidth - 5, y: 120 });
+      const flipped = parseFloat(tracking.div.style.left)
+        === paneLeft + paneWidth - 5 - 15 - 96;
+      log.push('tooltipTracking:' + (trackingOk && flipped));
+
+      const magnifier = h.createTooltip(tipSeries.series,
+        { mode: 'magnifier', title: 'MAG', width: 96 }, 'tipMagnifier');
+      hover({ x: 200, y: 300 });
+      const magStyle = getComputedStyle(magnifier.div);
+      const magnifierOk = magStyle.borderTopWidth === '1px'
+        && magStyle.borderBottomWidth === '0px'
+        && magnifier.div.style.display === 'block'
+        && magnifier.div.textContent.indexOf('MAG') === 0
+        && parseFloat(magnifier.div.style.left) === paneLeft + 200 - 48
+        && parseFloat(magnifier.div.style.top) === paneTop
+        && Math.round(magnifier.div.offsetHeight) === Math.round(paneRect.height);
+      // the band is clamped inside the pane at both edges
+      hover({ x: paneWidth - 2, y: 300 });
+      const rightEdge = parseFloat(magnifier.div.style.left) === paneLeft + paneWidth - 96;
+      hover({ x: 0, y: 300 });
+      const leftEdge = parseFloat(magnifier.div.style.left) === paneLeft;
+      // leaving the pane hides it again
+      hover(undefined);
+      const hidden = tracking.div.style.display === 'none'
+        && magnifier.div.style.display === 'none';
+      log.push('tooltipMagnifier:'
+        + (magnifierOk && rightEdge && leftEdge && hidden));
+
+      const tipCount = () => h.div.querySelectorAll('.tooltip').length;
+      const tipsBefore = tipCount();
+      Lib.invoke('tipMagnifier', 'hide', []);
+      hover({ x: 100, y: 100 });
+      const staysHidden = magnifier.div.style.display === 'none'
+        && Lib.invoke('tipMagnifier', 'visible', []) === false;
+      Lib.invoke('tipMagnifier', 'show', []);
+      hover({ x: 100, y: 100 });
+      const shownAgain = magnifier.div.style.display === 'block';
+      Lib.invoke('tipMagnifier', 'applyOptions', [{ width: 120 }]);
+      const restyled = Math.round(magnifier.div.offsetWidth) === 120;
+      Lib.invoke('tipTracking', 'remove', []);
+      log.push('tooltipLifecycle:' + (tipsBefore === 2 && staysHidden
+        && shownAgain && restyled && tipCount() === tipsBefore - 1));
+
+      // --- indicator panes: a series in a new pane, then remove it: the legend
+      // row goes with it and the emptied pane disappears (an empty pane is only
+      // kept when it was created with preserveEmptyPane) ---
+      const panesNow = () => h.chart.panes().length;
+      const paneRowsNow = () => h.legend._lines.length;
+      const basePanes = panesNow();
+      const basePaneRows = paneRowsNow();
+      h.chart.addPane();
+      h.addSeries('Line', 'pane indicator', { color: '#7E57C2' },
+        'paneSeries', basePanes, true);
+      const grewPanes = panesNow();
+      const grewRows = paneRowsNow();
+      // a pane created with preserveEmptyPane survives an empty pane ...
+      h.chart.addPane(true);
+      const preserved = panesNow();
+      h.chart.removePane(basePanes + 1);
+      // ... and removing the series drops the legend row + the emptied pane
+      h.removeSeries(Lib.lookup('paneSeries'));     // the wrapper, like delete()
+      log.push('paneLifecycle:' + (grewPanes === basePanes + 1
+        && grewRows === basePaneRows + 1
+        && preserved === grewPanes + 1
+        && panesNow() === basePanes
+        && paneRowsNow() === basePaneRows));
+
+      // --- two price scales: a series on the left axis makes it visible ---
+      // (the tutorial's recipe: both scales visible + priceScaleId on the
+      // series that should use the left one)
+      const overlay = h.addSeries('Candlestick', 'overlay',
+        { priceScaleId: 'left', upColor: '#26A69A', downColor: '#EF5350' },
+        'overlaySeries');
+      overlay.series.setData([
+        { time: 1600000000, open: 10, high: 12, low: 9, close: 11 },
+        { time: 1600086400, open: 11, high: 13, low: 10, close: 12 },
+        { time: 1600172800, open: 12, high: 14, low: 11, close: 10 },
+      ]);
+      h.chart.applyOptions({ leftPriceScale: { visible: true } });
+      log.push('leftScaleSeries:' + (overlay.series.options().priceScaleId === 'left'));
+
+      h.chart.timeScale().fitContent();
+      log.push('RESULT_OK');
+
+      // --- pixel-level verification (async, after a render frame) ---
+      setTimeout(function () {
+        try {
+          const canvases = Array.from(h.div.querySelectorAll('canvas'));
+          let drawn = 0, total = 0, maxW = 0, maxH = 0;
+          for (const c of canvases) {
+            maxW = Math.max(maxW, c.width);
+            maxH = Math.max(maxH, c.height);
+            const ctx = c.getContext('2d');
+            if (!ctx || !c.width || !c.height) continue;
+            const d = ctx.getImageData(0, 0, c.width, c.height).data;
+            for (let i = 0; i < d.length; i += 4) {
+              total++;
+              // count pixels that are not near-black (chart background is #000)
+              if (d[i] > 20 || d[i + 1] > 20 || d[i + 2] > 20) drawn++;
+            }
+          }
+          log.push('twoPriceScales:' + (h.chart.priceScale('left').width() > 0
+            && h.chart.priceScale('right').width() > 0));
+          // the legend is anchored to the pane, so a visible left scale (which
+          // is drawn exactly where the legend used to start) does not sit under
+          // its text: it has to start past the scale
+          const widgetLeft = Math.round(
+            h.chart.panes()[0].getHTMLElement().getBoundingClientRect().left
+            - h.div.getBoundingClientRect().left);
+          const leftScaleWidth = Math.round(h.chart.priceScale('left').width());
+          const legendLeft = parseFloat(h.legend.div.style.left);
+          log.push('legendClearsLeftScale:' + (leftScaleWidth > 0
+            && legendLeft === widgetLeft + leftScaleWidth + 10));
+          // ... and the tooltips measure the same drawing area: `point` is
+          // relative to it, so a visible left scale shifts the box right
+          const tipAfter = h.createTooltip(overlay.series,
+            { mode: 'tracking', margin: 15, width: 96 }, 'tipAfterLeft');
+          h._dispatchCrosshair({
+            point: { x: 120, y: 150 },
+            time: 1600000000,
+            seriesData: new Map([[overlay.series, { time: 1600000000, open: 10,
+              high: 12, low: 9, close: 11 }]]),
+          });
+          const expected = widgetLeft + leftScaleWidth + 120 + 15;
+          log.push('tooltipAccountsForLeftScale:'
+            + (parseFloat(tipAfter.div.style.left) === expected));
+          // --- zooming out stops at the newest bar ---
+          // `timeToCoordinate` is spied on so both cases are exact: the newest
+          // bar inside the pane must pin the right edge, and off the right edge
+          // the classic middle-anchored zoom has to stay.
+          window.handlerInFocus = h.id;
+          const step = h.keyboardStep;
+          const paneWidth = ts.width();
+          const realTimeToCoordinate = ts.timeToCoordinate.bind(ts);
+          const bars = h.series.data();
+          const liveX = realTimeToCoordinate(bars[bars.length - 1].time);
+          const pressZoomOutAt = (x) => {
+            ts.timeToCoordinate = () => x;
+            seen.ranges.length = 0;
+            seen.bases.length = 0;
+            press('ArrowDown');
+            return {base: seen.bases[0], call: seen.ranges[0]};
+          };
+          const edge = pressZoomOutAt(paneWidth - 5);
+          const away = pressZoomOutAt(paneWidth + 200);
+          ts.timeToCoordinate = realTimeToCoordinate;
+          const span = (r) => r.to - r.from;
+          const mid = (r) => (r.from + r.to) / 2;
+          const near = (a, b) => Math.abs(a - b) < 1.5;
+          const clamped = near(edge.call.to, edge.base.to)
+            && near(span(edge.call), span(edge.base) * (1 + step))
+            && near(edge.call.from, edge.base.to - span(edge.call));
+          const symmetric = near(mid(away.call), mid(away.base))
+            && near(span(away.call), span(away.base) * (1 + step));
+          log.push('arrowZoomRightClamp:' + (liveX !== null && liveX <= paneWidth
+            && clamped && symmetric));
+          const finish = () => {
+            const px = 'canvases:' + canvases.length + ' size:' + maxW + 'x' + maxH
+              + ' nonBlackPx:' + drawn + '/' + total
+              + ' ratio:' + (total ? (drawn / total).toFixed(4) : '0');
+            document.title = log.join(' | ') + ' | ' + px;
+            document.getElementById('result').textContent = document.title;
+          };
+          finish();
+        } catch (e) {
+          document.title = log.join(' | ') + ' | PIXEL_ERROR: ' + e;
+          document.getElementById('result').textContent = document.title;
+        }
+      }, 800);
+    } catch (e) {
+      log.push('RESULT_ERROR: ' + (e && e.stack ? e.stack : String(e)));
+      const text = log.join(' | ');
+      document.getElementById('result').textContent = text;
+      document.title = text;
+    }
+  })();
+  </script>
+</body>
+</html>

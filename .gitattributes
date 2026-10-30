@@ -1,5 +1,13 @@
-* text=auto
+# Normalise text to LF in the repository so the CI freshness check
+# (`git diff --exit-code -- pylightcharts/js`) is stable across platforms.
+* text=auto eol=lf
+
+# Build outputs must match the bundler byte-for-byte - never touch them.
+pylightcharts/js/* -text
+
+# Binary assets
 *.png binary
+*.gif binary
 *.jpg binary
-*.jpeg binary
-*.vsix binary
+*.woff binary
+*.woff2 binary

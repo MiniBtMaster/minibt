@@ -1,0 +1,32 @@
+# sdist = 完整源码树（wheel 只带 pylightcharts/ + js 资源）。
+#
+# 目的：`pip download pylightcharts --no-binary :all:` 解出来的 sdist
+# 里，`pytest tests -q` 与 `examples/` 都能直接用（不然 tests/ 里的
+# 示例测试会因为找不到 examples/ 而失败）。
+include LICENSE
+include NOTICE
+include README.md
+include README.zh-CN.md
+include RELEASING.md
+include pyproject.toml
+include requirements.txt
+include requirements-dev.txt
+include mkdocs.yml
+
+recursive-include docs *.md *.yml
+recursive-include examples *.py *.md *.ipynb *.json *.html *.css *.js *.txt
+recursive-include scripts *.py *.json *.md
+recursive-include tests *.py *.json *.md
+recursive-include jslib *.ts *.json *.mjs *.css *.html *.md
+
+# JS 构建产物与依赖不进 sdist（bundle 已随 pylightcharts/js 发布）
+prune jslib/node_modules
+prune jslib/dist
+prune jslib/typings
+prune jslib/coverage
+prune jslib/.rollup.cache
+
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *.so
+global-exclude .DS_Store

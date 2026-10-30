@@ -1,0 +1,425 @@
+:root {
+	--bg-color:#0c0d0f;
+	--hover-bg-color: #3c434c;
+	--click-bg-color: #50565E;
+	--active-bg-color: rgba(0, 122, 255, 0.7);
+	--muted-bg-color: rgba(0, 122, 255, 0.3);
+	--border-color: #3C434C;
+	--color: #d8d9db;
+	--active-color: #ececed;
+	/* every one of these is overridable from python via Window.style(...)
+	   (or automatically by pylightcharts.qt.ChartTheme) */
+}
+
+body {
+	background-color: var(--bg-color);
+	color: var(--color);
+	overflow: hidden;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
+            Cantarell, "Helvetica Neue", sans-serif;
+}
+
+.handler {
+	display: flex;
+	flex-direction: column;
+	position: relative;
+}
+
+.toolbox {
+	position: absolute;
+	z-index: 2000;
+	display: flex;
+	align-items: center;
+	top: 25%;
+	border: 2px solid var(--border-color);
+	border-left: none;
+	border-top-right-radius: 4px;
+	border-bottom-right-radius: 4px;
+	background-color: var(--bg-color);
+	flex-direction: column;
+}
+
+.toolbox-button {
+	margin: 3px;
+	border-radius: 4px;
+	display: flex;
+	background-color: transparent;
+}
+.toolbox-button:hover {
+	background-color: var(--hover-bg-color);
+}
+.toolbox-button:active {
+	background-color: var(--click-bg-color);
+}
+.toolbox-button g {
+	fill: var(--color);
+	color: var(--color);
+}
+
+.active-toolbox-button {
+	background-color: var(--active-bg-color) !important;
+}
+.active-toolbox-button g {
+	fill: var(--active-color);
+}
+
+.context-menu {
+	position: absolute;
+	z-index: 1000;
+	background: var(--bg-color);
+	color: var(--color);
+	display: none;
+	border-radius: 5px;
+	padding: 3px 3px;
+	font-size: 13px;
+	cursor: default;
+}
+.context-menu-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 2px 10px;
+	margin: 1px 0px;
+	border-radius: 3px;
+}
+.context-menu-item:hover {
+	background-color: var(--muted-bg-color);
+}
+
+.color-picker {
+	max-width: 170px;
+	background-color: var(--bg-color);
+	position: absolute;
+	z-index: 10000;
+	display: none;
+	flex-direction: column;
+	align-items: center;
+	border: 2px solid var(--border-color);
+	border-radius: 8px;
+	cursor: default;
+}
+
+
+/* topbar-related */
+.topbar {
+	background-color: var(--bg-color);
+	border-bottom: 2px solid var(--border-color);
+	display: flex;
+	align-items: center;
+}
+
+.topbar-container {
+	display: flex;
+	align-items: center;
+	flex-grow: 1;
+}
+
+.topbar-button {
+	border: none;
+	padding: 2px 5px;
+	margin: 4px 10px;
+	font-size: 13px;
+	border-radius: 4px;
+	color: var(--color);
+	background-color: transparent;
+}
+.topbar-button:hover {
+	background-color: var(--hover-bg-color)
+}
+
+.topbar-button:active {
+	background-color: var(--click-bg-color);
+	color: var(--active-color);
+	font-weight: 500;
+}
+
+.switcher-button:active {
+	background-color: var(--click-bg-color);
+	color: var(--color);
+	font-weight: normal;
+}
+
+.active-switcher-button {
+	background-color: var(--active-bg-color) !important;
+	color: var(--active-color) !important;
+	font-weight: 500;
+}
+
+.topbar-textbox {
+	margin: 0px 18px;
+	font-size: 16px;
+	color: var(--color);
+}
+
+.topbar-textbox-input {
+	background-color: var(--bg-color);
+	color: var(--color);
+	border: 1px solid var(--color);
+}
+
+.topbar-menu {
+	position: absolute;
+	display: none;
+	z-index: 10000;
+	background-color: var(--bg-color);
+	border-radius: 2px;
+	border: 2px solid var(--border-color);
+	border-top: none;
+	align-items: flex-start;
+	max-height: 80%;
+	overflow-y: auto;
+}
+
+.topbar-separator {
+	width: 1px;
+	height: 20px;
+	background-color: var(--border-color);
+}
+
+.searchbox {
+	position: absolute;
+	top: 0;
+	bottom: 200px;
+	left: 0;
+	right: 0;
+	margin: auto;
+	width: 150px;
+	height: 30px;
+	padding: 5px;
+	z-index: 1000;
+	align-items: center;
+	background-color: var(--bg-color);
+	border: 2px solid var(--border-color);
+	border-radius: 5px;
+	display: flex;
+
+}
+.searchbox input {
+	text-align: center;
+	width: 100px;
+	margin-left: 10px;
+	background-color: var(--muted-bg-color);
+	color: var(--active-color);
+	font-size: 20px;
+	border: none;
+	outline: none;
+	border-radius: 2px;
+}
+
+.spinner {
+	width: 30px;
+	height: 30px;
+	border: 4px solid rgba(255, 255, 255, 0.6);
+	border-top: 4px solid var(--active-bg-color);
+	border-radius: 50%;
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	z-index: 1000;
+	transform: translate(-50%, -50%);
+	display: none;
+}
+
+.legend {
+	position: absolute;
+	z-index: 3000;
+	pointer-events: none;
+	top: 10px;
+	left: 10px;
+	display: none;
+	flex-direction: column;
+}
+.series-container {
+    display: flex;
+    flex-direction: column;
+    pointer-events: auto;
+    overflow-y: auto;
+    max-height: 80vh;
+}
+.series-container::-webkit-scrollbar {
+    width: 0px;
+}
+.legend-toggle-switch {
+	border-radius: 4px;
+	margin-left: 10px;
+	pointer-events: auto;
+	display: flex;
+	align-items: center;
+}
+.legend-toggle-switch:hover {
+	cursor: pointer;
+	background-color: var(--hover-bg-color);
+}
+.legend-settings-switch {
+	border-radius: 4px;
+	margin-left: 6px;
+	pointer-events: auto;
+	display: flex;
+	align-items: center;
+	/* 跟图例文字/眼睛同一个颜色（不写死 var(--color)，浅色主题也一致）✓ */
+	color: inherit;
+}
+.legend-settings-switch:hover {
+	cursor: pointer;
+	background-color: var(--hover-bg-color);
+}
+/* ---- indicator settings menu (JS replacement for miniqt's PyQt card) ---- */
+.legend-menu {
+	position: absolute;
+	z-index: 5000;
+	display: none;
+	flex-direction: column;
+	min-width: 120px;
+	max-height: 80vh;
+	overflow-y: auto;
+	padding: 4px 0;
+	background-color: var(--bg-color);
+	border: 2px solid var(--border-color);
+	border-radius: 4px;
+	color: var(--color);
+	font-size: 13px;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+.legend-menu-title {
+	padding: 4px 10px;
+	font-weight: 600;
+	color: var(--color);
+	opacity: 0.7;
+	white-space: nowrap;
+}
+.legend-menu-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 4px 10px;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.legend-menu-item:hover {
+	background-color: var(--hover-bg-color);
+}
+.legend-menu-arrow {
+	opacity: 0.6;
+}
+.legend-menu-sub {
+	min-width: 140px;
+}
+.legend-menu-choice {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 10px;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.legend-menu-choice:hover {
+	background-color: var(--hover-bg-color);
+}
+.legend-menu-choice.active {
+	color: var(--color);
+	background-color: var(--muted-bg-color);
+}
+.legend-menu-choice.active::after {
+	content: '\2713';
+	margin-left: auto;
+}
+.legend-menu-toggle > span:last-child {
+	margin-left: auto;
+}
+.legend-menu-toggle span.on {
+	color: var(--color);
+	font-weight: 600;
+}
+.legend-menu-chip {
+	width: 12px;
+	height: 12px;
+	border-radius: 2px;
+	border: 1px solid var(--border-color);
+	display: inline-block;
+}
+.legend-menu-color-input {
+	margin: 4px 10px;
+	width: 28px;
+	height: 22px;
+	padding: 0;
+	border: 1px solid var(--border-color);
+	background: none;
+	cursor: pointer;
+}
+.legend-menu-param-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 10px;
+}
+.legend-menu-flag {
+	opacity: 0.7;
+}
+.legend-menu-param-name {
+	min-width: 48px;
+}
+.legend-menu-param-input {
+	flex: 1;
+	min-width: 70px;
+	background-color: var(--muted-bg-color);
+	color: var(--color);
+	border: 1px solid var(--border-color);
+	border-radius: 2px;
+	outline: none;
+	padding: 2px 6px;
+	font-size: 12px;
+}
+/* 只读参数（对比合约 KLine / DataFrame）：可看不可改 ✓ */
+.legend-menu-param-row.is-readonly {
+	opacity: 0.6;
+}
+.legend-menu-param-row.is-readonly .legend-menu-param-input {
+	cursor: not-allowed;
+	font-style: italic;
+}
+.legend-menu-confirm {
+	margin: 6px 10px 4px;
+	padding: 4px 10px;
+	text-align: center;
+	cursor: pointer;
+	border-radius: 3px;
+	background-color: var(--active-bg-color);
+	color: var(--active-color);
+}
+.legend-menu-confirm:hover {
+	background-color: var(--hover-bg-color);
+}
+.legend-collapse {
+	cursor: pointer;
+	user-select: none;
+	pointer-events: auto;
+	position: relative;
+	z-index: 8;
+	margin-top: 2px;
+	line-height: 1.4;
+	opacity: 0.85;
+	width: fit-content;
+	padding: 0 4px;
+	border-radius: 4px;
+}
+.legend-collapse:hover {
+	background-color: var(--hover-bg-color);
+}
+
+/* ---------------------------------------------------------------- pane 分隔行
+   主图 / 副图、副图 / 副图之间的分隔行：固定 **2px**（LWC 默认约 1px，
+   颜色由 `layout.panes.separatorColor` 给，深浅主题各一套 ✓）。
+   拖动调整副图高度的热区仍在这一行上，所以不要 `pointer-events: none`。 */
+#container tr:has(> td[colspan="3"]),
+.tv-lightweight-charts tr:has(> td[colspan="3"]) {
+	height: 2px !important;
+	line-height: 2px !important;
+}
+#container tr > td[colspan="3"],
+.tv-lightweight-charts tr > td[colspan="3"] {
+	height: 2px !important;
+	padding: 0 !important;
+	border: 0 !important;
+	overflow: visible !important;
+}

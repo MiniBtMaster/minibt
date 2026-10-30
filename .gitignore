@@ -1,27 +1,85 @@
-# 依赖 / 编辑器
-node_modules/
-.vscode-test/
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
-
-# 打包产物：VSIX 放到 GitHub Releases，不提交
-*.vsix
-_vsix_backup/
-
-# Python 运行器缓存
+# --- Python ---
 __pycache__/
 *.py[cod]
-*.pyo
-.pytest_cache/
+*.egg-info/
+.eggs/
+build/
+dist/
 .venv/
 venv/
-env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# 日志 / 临时文件
+# --- Node / JS build ---
+node_modules/
+jslib/dist/
+jslib/typings/
+
+# --- generated JS assets shipped in the python package ---
+# (uncomment and commit them instead if you want wheel builds without node)
+# pylightcharts/js/bundle.js
+# pylightcharts/js/lightweight-charts.js
+
+# --- docs build output ---
+site/
+
+# --- reference sources (upstream repos used only for consulting) ---
+reference/
+lightweight-charts/
+lightweight-charts-python/
+lwc-python/
+
+# --- misc ---
+.DS_Store
 *.log
-*.tmp
-*.bak
-*.orig
-*.tsbuildinfo
+tests/e2e/*.png
+
+# --- sibling projects living in this directory (not part of pylightcharts) ---
+minibt/
+miniqt/
+tutorials/
+minibt_docs/
+
+# demo output
+examples/10_qt_migration/qt_demo.png
+examples/12_browser/browser_static.html
+examples/11_api_tour/screenshot_*.png
+examples/11_api_tour/drawings_13.json
+
+# stray dir created by miniqt/app/common/config.py (relative qconfig path) when
+# something imports it with the repo root as cwd
+/app/
+
+# qt panel example output
+
+# qfluentwidgets 源码副本（69MB / 1248 个文件，不属于本仓库）
+PyQt-Fluent-Widgets-master/
+
+# --- local scratch / debug output（不随包发布）---
+_diag_*.py
+_*.png
+_*.js
+_bundle_current/
+API_*.md
+1.jpg
+1_page*.jpg
+.vscode/
+
+# --- 本地策略脚本 / 预览产物（含真实天勤账号，绝不能提交）---
+# 这些是仓库根目录下的个人调试文件，不是包的一部分；`git add -A` 前
+# 请保持它们在忽略列表里（详见 RELEASING.md「发布前最后确认」）。
+cci.py
+cci.html
+cci.ipynb
+example_realtime.py
+example_tq_live.py
+strategy_replay.py
+probe_chart.py
+bench_minibt.py
+bench_minibt.html
+test.py
+BtPlot.ipynb
+01_backtest_bokeh.ipynb
+examples/8_headless/chart.html
+examples/8_headless/chart.png

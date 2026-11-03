@@ -1,0 +1,95 @@
+# ============================================================================
+# minibt —— GitHub 仓库忽略规则
+#
+# 结构：仓库根 = 本目录（README / pyproject / setup.py / MANIFEST.in / …）
+#       Python 包 = minibt/（__init__.py / desk / strategy / data / …）
+#       教程 = tutorials/
+#
+# 注意：`.gitignore` 里 **行尾不能写注释** —— `*.c  # xxx` 会被当成
+#       "带注释的完整通配符"从而**永远匹配不上**（实测踩过 ✗）。
+#       注释一律单独占一行。
+# 另外：只对**未跟踪**文件生效；已提交的要 `git rm -r --cached <路径>`。
+# ============================================================================
+
+# ===== Python 字节码 / 缓存 =====
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ===== 构建产物（wheel / sdist / egg-info 一律不入库）=====
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+wheelhouse/
+
+# ===== Cython 生成 / 编译产物 =====
+*.pyd
+*.so
+*.dylib
+# cythonize 从 .pyx 生成，不入库
+*.c
+
+# 回测 / 因子报告等运行时生成（tutorials/**/reports/*.html 也靠它）
+*.html
+
+# ===== 虚拟环境 / 工具缓存 =====
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+.coverage.*
+htmlcov/
+# mkdocs build 输出
+site/
+
+# ===== minibt 运行时数据（不随仓库分发）=====
+minibt/logs/
+minibt/strategy/plots/
+minibt/strategy/analysis_reports/
+minibt/op_params/*.csv
+# 运行时生成的实例 id（minibt/liveplot/ 已于 1.2.9 删除）
+minibt/id
+minibt/strategy/backtest_result.json
+minibt/strategy/setting.json
+# desk 的个人配置 / 状态（正常落在 ~/.minibt，万一被拷进仓库也别传）
+desk_personal.json
+tv_groups.json
+tv_state.json
+minibt/desk/*.log
+*.log
+
+# ===== 敏感文件：账号 / 密钥 / 实盘脚本（即使现在没有，也先挡住）=====
+.env
+.env.*
+*.pem
+*.key
+*_secret*
+# 带天勤账号的调试脚本（**只在仓库根**，不要影响 tutorials/ 里的示例）
+/77*.py
+# 带账号的旧示例（同上，只在仓库根）
+/cci*.py
+# 实盘脚本（同上；tutorials/ 里的 *live*.py 账号都是从命令行 / 环境变量取，可上传）
+/*_live_*.py
+# 运行时账户状态（任何位置）
+account_info*
+trade_datas*
+minibt/account_info*
+minibt/trade_datas*
+
+# ===== 备份 / 补丁残留 =====
+*.bak
+*.orig
+*.rej
+*~
+
+# ===== 编辑器 / 系统 =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

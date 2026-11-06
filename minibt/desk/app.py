@@ -309,6 +309,10 @@ class Desk:
         self._home_active = False
         #: 首页账户卡当前选中的模拟账户：futures / stocks
         self._home_account_kind = 'futures'
+        #: ★ 账户 key 必须**每实例独立**（写成类属性会跨实例串号 ✗）
+        self._account_kind = ''
+        self._home_key = ''
+        self._account_keys: Dict[str, str] = {}
         self._home_at = 0.0
         #: 首页「主力」点开时天勤合约还没就绪 → 2 秒后自动重查 ✓
         self._home_main_retry_exchange = ''
@@ -343,6 +347,10 @@ class Desk:
         self._main_indices: List[tuple] = []
         #: 正在登录（主线程此时不要碰 tqsdk，否则抢锁卡死 ✗）
         self._login_busy = False
+        #: 当前天勤账户指纹 `(用户名, 期货公司, 资金账号)`（换账户时重连 ✓）
+        self._account_fp: tuple = ()
+        #: 换账户时**待关闭**的旧行情源（主线程关，避免跨线程碰 tqsdk ✗）
+        self._old_feed_pending = None
         #: 待连接的行情源（**主线程**执行：tqsdk / futu 只能在创建线程用 ✓）
         self._connect_pending = None
         #: 取数超时后的「冷静期」（避免每拍都卡在超时上 ✓）
@@ -380,6 +388,11 @@ class Desk:
         self.visible: List[str] = []
         #: 已打开的看盘 tab → (feed, cycle)
         self.tabs: Dict[str, Dict[str, Any]] = {}
+        #: 买卖盘按格订阅：`{页签 id: {格: 合约 / 数据名}}`（👁 打开才推盘口 ✓）
+        self._book_watch: Dict[str, Dict[str, str]] = {}
+        #: 二级报价的**焦点合约**（按页记：鼠标最后点的那一格 ✓）
+        self._book_focus: Dict[str, str] = {}
+        self._book_at = 0.0
         #: 后台启动中（不发补丁 → 先攒着）
         self._booted = False
         self._pending: List[str] = []
@@ -483,15 +496,21 @@ class Desk:
         return self
 
     def add_stocks(self, host: str = '127.0.0.1', port: int = 11111,
-                   sim_account: str = 'desk', trade: bool = False,
+                   sim_account: str = 'desk', trade: bool = None,
                    **kwargs) -> 'Desk':
         """接股票（富途 OpenD）。连不上只影响股票页，期货照常 ✓
 
         Args:
             sim_account: 本地模拟盘账本名（默认 ``'desk'``，与别的工具分开）
-            trade: ``False``（默认）= 只行情 + 本地模拟成交；``True`` = 真实交易
+            trade: ``None``（默认）= **模拟盘自动开启交易**（用富途官方模拟账户
+                ✓，用户 2026-11-06）；``False`` = 只行情 + 本地记账；
+                ``True`` = 真实交易（`trd_env='REAL'` 时才需要）
         """
         from ..stock_api import StockApi
+        env = str(kwargs.get('trd_env') or 'SIMULATE').upper()
+        if trade is None:
+            # ★ 模拟盘：默认连富途**官方模拟账户**，持仓 / 权益与富途 App 一致 ✓
+            trade = env == 'SIMULATE'
         api = StockApi(host=host, port=port, trade=trade,
                        sim_account=sim_account, **kwargs)
         self.stocks = StockFeed(api, 'stocks')
@@ -785,41 +804,55 @@ class Desk:
         if getattr(self, '_login_busy', False):
             # ★ 登录线程正在建 TqApi / 用 api → 主线程**别碰**（会卡死 ✗）
             return
-        api = getattr(getattr(self, 'futures', None), 'api', None)
-        if api is None:
-            return
-
-        wait = getattr(api, 'wait_update', None)
-        if not callable(wait):
-            return
+        # ★ **每个行情源都要泵**：以前只泵期货 → 只连富途（或期货断线）时
+        #   股票 api 的 `wait_update` 永远没被调用 → 股票 K 线 / 报价 /
+        #   二级报价 / 交易面板价格框全部冻住（用户实测 2026-11-05 ✗）
         span = self.PUMP_DEADLINE if timeout is None else float(timeout)
-        try:
-            wait(deadline=time.time() + span)
-        except Exception as error:                               # noqa: BLE001
-            # ★ TqSdk 对“不存在的合约”会抛 GraphQL 错误；如果只 catch
-            #   不清理，这个订阅会每拍继续把行情泵打断 → 首页 / 报价全空 ✗。
-            #   从错误里取出合约代码，取消它的订阅，再让 pump 继续 ✓
-            text = str(error)
-            for bad in re.findall(r'\[([A-Za-z0-9_.]+)\]', text) + \
-                    re.findall(r'instrument:\s*([A-Za-z0-9_.]+)', text):
-                # ★ 天勤的报错里经常只有**裸代码**（`ag2612` / `rb2701`）。
-                #   先在服务端合约字典里查一下：这个品种真有该合约 →
-                #   说明报错来自别处（例如拿裸代码建 TargetPosTask），
-                #   **不能**把合法的 `SHFE.ag2612` 拉黑 / 从缓存删掉 ✗
-                if '.' not in str(bad) and self._contract_exists(bad):
-                    continue
-                feed = getattr(self, 'futures', None)
+        feeds = [feed for feed in (getattr(self, 'futures', None),
+                                   getattr(self, 'stocks', None))
+                 if feed is not None]
+        for feed in feeds:
+            api = getattr(feed, 'api', None)
+            wait = getattr(api, 'wait_update', None)
+            if not callable(wait):
+                continue
+            # ⚠ 两套语义：tqsdk 的 `deadline` 是**绝对时间戳**，
+            #   富途 `StockApi.wait_update(deadline)` 是**等多少秒** ✓
+            #   以前统一传时间戳 → 富途那侧会 sleep 满 `poll_interval`，
+            #   一拍被拖慢好几倍（用户实测"更新很慢" ✗ 2026-11-05）
+            deadline = (span if hasattr(api, 'poll_interval')
+                        else time.time() + span)
+            try:
+                wait(deadline=deadline)
+            except Exception as error:                           # noqa: BLE001
+                self._pump_error(error)
+        return
+
+    def _pump_error(self, error) -> None:
+        """行情泵异常 → 清掉无效订阅，别让一次报错把整台泵打死 ✓"""
+        # ★ TqSdk 对"不存在的合约"会抛 GraphQL 错误；如果只 catch
+        #   不清理，这个订阅会每拍继续把行情泵打断 → 首页 / 报价全空 ✗
+        text = str(error)
+        for bad in re.findall(r'\[([A-Za-z0-9_.]+)\]', text) +                 re.findall(r'instrument:\s*([A-Za-z0-9_.]+)', text):
+            # ★ 天勤的报错里经常只有**裸代码**（`ag2612` / `rb2701`）。
+            #   先在服务端合约字典里查一下：这个品种真有该合约 →
+            #   说明报错来自别处（例如拿裸代码建 TargetPosTask），
+            #   **不能**把合法的 `SHFE.ag2612` 拉黑 / 从缓存删掉 ✗
+            if '.' not in str(bad) and self._contract_exists(bad):
+                continue
+            for feed in (getattr(self, 'futures', None),
+                         getattr(self, 'stocks', None)):
                 drop = getattr(feed, 'drop_symbol', None)
                 if callable(drop):
                     try:
                         drop(bad)
-                    except Exception:                        # noqa: BLE001
+                    except Exception:                            # noqa: BLE001
                         pass
-                self._purge_bad_symbol(bad)
-            if not getattr(self, '_pump_warned', False):
-                self._pump_warned = True
-                self.push_log(f'行情泵异常（已移除无效订阅，稍后重试）：{error!r}',
-                              'warning')
+            self._purge_bad_symbol(bad)
+        if not getattr(self, '_pump_warned', False):
+            self._pump_warned = True
+            self.push_log(f'行情泵异常（已移除无效订阅，稍后重试）：{error!r}',
+                          'warning')
         else:
             self._pump_warned = False
 
@@ -1090,6 +1123,8 @@ class Desk:
                 if self._quotes_visible():
                     step('首页刷新', self._refresh_home)
                 step('看盘 tab', self._refresh_tabs)
+                step('买卖盘（每格）', self._push_book_watch)
+            step('下单回执', self._poll_order_receipts)
             step('账户面板', self._refresh_docks)
             if not busy:
                 step('价格预警', self.check_alerts)
@@ -1157,6 +1192,11 @@ class Desk:
         from . import user_prefs as _prefs
         values = _prefs.settings()
         self.push({'type': 'settings', 'settings': values})
+        # ★ 账户目录（三个选项 + 可用状态）✓
+        try:
+            self.push(self.account_kind_payload())
+        except Exception:                                        # noqa: BLE001
+            pass
         self._apply_log_settings(values)
         watch = _prefs.watch()
         self.push({'type': 'watch', **watch})
@@ -1362,25 +1402,510 @@ class Desk:
              'tone': 'blue'},
         ]
 
+    #: 统一账户目录（首页账户卡 + 交易账户页下拉共用 ✓）
+    ACCOUNT_KEYS = (('kq', '快期模拟', 'futures'),
+                    ('futu', '富途模拟', 'stocks'),
+                    ('real', 'TqAccount', 'futures'))
+
+    def account_catalog(self) -> List[Dict[str, Any]]:
+        """三个账户 + **可用状态**（是否登录了对应账户 ✓）
+
+        * ``kq``   快期模拟（天勤 `TqKq`）—— 期货
+        * ``futu`` 富途模拟（FutuOpenD 模拟盘）—— 股票
+        * ``real`` TqAccount 实盘 —— 期货
+
+        用户 2026-11-05：两个下拉框（首页账户概览 / 交易账户页）**选项一致**，
+        没登录的那项置灰不可选 ✓
+        """
+        futures_on = bool(self.futures is not None
+                          and getattr(self.futures, 'available',
+                                      lambda: False)())
+        stocks_on = bool(self.stocks is not None
+                         and getattr(self.stocks, 'available',
+                                     lambda: False)())
+        real_available = bool(getattr(self, '_real_account', False)
+                              or getattr(self, '_real_login', False))
+        if futures_on and not real_available:
+            # ★ 直接扫天勤的账户列表（**不要**经过 `AccountView`：
+            #   它的 `api()` 会问 `active_account_key()` → 和这里递归 ✗）
+            try:
+                api = getattr(self.futures, 'api', None)
+                account = getattr(api, '_account', None)
+                items = list(getattr(account, '_account_list', None) or [])
+                real_available = any(
+                    str(getattr(item, 'broker_id', '') or '')
+                    or str(getattr(item, 'account_id', '') or '')
+                    for item in items)
+            except Exception:                                    # noqa: BLE001
+                real_available = False
+        items: List[Dict[str, Any]] = []
+        for key, label, kind in self.ACCOUNT_KEYS:
+            if key == 'kq':
+                available = futures_on
+            elif key == 'futu':
+                available = stocks_on
+            else:
+                available = real_available
+            items.append({'key': key, 'label': label, 'kind': kind,
+                          'available': bool(available)})
+        return items
+
+    def _feed_online(self, kind: str) -> bool:
+        """这个**品种**的行情源在不在（kq/real → 期货；futu → 股票）✓"""
+        feed = self.stocks if kind == 'stocks' else self.futures
+        return bool(feed is not None
+                    and getattr(feed, 'available', lambda: False)())
+
+    #: 首页的账户 key / 每页的账户 key 在 `__init__` 里初始化
+    #: （**不能**写成可变的类属性：多个 Desk 实例会共享 → 串号 ✗）
+    _home_key: str = ''
+    _account_keys: Dict[str, str] = {}
+
+    def account_key_for(self, target: str = '') -> str:
+        """某个页面 / 合约的账户 key（**按页独立** ✓）
+
+        `target` 可以是页签 id（`chart:SHFE.ag2612`）、合约名、或空（=首页）。
+        没设置过的页面 → 用首页当前 key（新开图表跟着首页起步 ✓）。
+        """
+        text = str(target or '')
+        keys = getattr(self, '_account_keys', None) or {}
+        if text and text in keys:
+            return keys[text]
+        if text and f'chart:{text}' in keys:
+            return keys[f'chart:{text}']
+        if not text:
+            return self.home_key()
+        # ★ `page#cell` / `symbol` 两种写法都要认（多布局每格独立 ✓）
+        if '#' in text:
+            head, _, tail = text.partition('#')
+            page = head
+            try:
+                cell_index = int(tail)
+            except ValueError:
+                cell_index = 0
+            symbol = self._cell_symbol(page, cell_index)
+            cell = cell_index
+            if f'{page}#{cell}' in keys:
+                return keys[f'{page}#{cell}']
+            if page in keys:
+                return keys[page]
+            if symbol and _is_stock(symbol):
+                return 'futu'
+            return self.home_key()
+        page = text if text.startswith(('chart:', 'local:'))             else f'chart:{text}'
+        symbol = self._page_symbol(page) or text
+        # ★ 多布局：**每格**可以有自己的账户（`page#cell`）✓
+        cell = self._cell_index_of(page, symbol)
+        if f'{page}#{cell}' in keys:
+            return keys[f'{page}#{cell}']
+        if page in keys:
+            return keys[page]
+        # ★ **按品种收敛**（绝不把股票账户用到期货合约上 / 反之 ✗）：
+        #   用户 2026-11-06：期货页提示「当前账户是富途模拟」—— 因为这一页
+        #   没有登记过 key 时直接退回**首页账户**，而首页正好是富途 ✗
+        if _is_stock(symbol):
+            return 'futu'
+        home = self.home_key()
+        return home if home in ('kq', 'real') else 'kq'
+
+    def _page_of_symbol(self, symbol: str) -> str:
+        """这个合约属于哪个页签（多布局的其它格 / 单图都要认 ✓）"""
+        symbol = str(symbol or '')
+        if not symbol:
+            return str(next(iter(self.tabs), ''))
+        if symbol in self.tabs:
+            return symbol
+        for tab, info in list(self.tabs.items()):
+            symbols = [str(item or '')
+                       for item in ((info.get('layout') or {}).get('symbols')
+                                    or [])]
+            if symbol in symbols:
+                return tab
+        return symbol
+
+    def _cell_index_of(self, page: str, symbol: str) -> int:
+        """某合约在**这一页的第几格**（多布局；找不到 → 0）✓"""
+        tab_symbol = self._page_symbol(page)
+        info = self.tabs.get(tab_symbol) or {}
+        layout = info.get('layout') or {}
+        symbols = [str(item or '') for item in (layout.get('symbols') or [])]
+        return symbols.index(symbol) if symbol in symbols else 0
+
+    def _cell_symbol(self, page: str, cell) -> str:
+        """某页第 N 格的合约（没有布局 / 越界 → 页签合约 ✓）"""
+        tab_symbol = self._page_symbol(page)
+        info = self.tabs.get(tab_symbol) or {}
+        symbols = [str(item or '')
+                   for item in ((info.get('layout') or {}).get('symbols') or [])]
+        try:
+            index = int(cell)
+        except (TypeError, ValueError):
+            index = 0
+        if 0 <= index < len(symbols) and symbols[index]:
+            return symbols[index]
+        return tab_symbol
+
+    def home_key(self) -> str:
+        """首页当前账户 key（核对过可用性 ✓）"""
+        return self._verified_account_key(getattr(self, '_home_key', ''))
+
+    def active_account_key(self) -> str:
+        """当前账户 key ✓
+
+        ⚠ 一旦用户选过（`_account_kind`），**只看该品种有没有连上**——
+          不再因为"实盘账户是否可用"这类抖动把选择打回模拟（用户实测
+          2026-11-05：首页在 快期模拟 / TqAccount 之间反复切换 ✗）。
+        """
+        key = str(getattr(self, '_account_kind', '') or '')
+        if key == 'futu' and self._feed_online('stocks'):
+            return key
+        if key in ('kq', 'real') and self._feed_online('futures'):
+            return key
+        items = self.account_catalog()
+        available = [item['key'] for item in items if item['available']]
+        fallback = ('kq' if 'kq' in available else
+                    ('futu' if 'futu' in available else
+                     (available[0] if available else 'kq')))
+        if fallback != key:
+            self._account_kind = fallback
+        return fallback
+
+    def _verified_account_key(self, key: str = '') -> str:
+        """核对后的当前账户 key（**以天勤账户列表的实际内容为准** ✓）
+
+        用户 2026-11-05 实测的两个问题都靠这里收口：
+
+        1. 「切到实盘但数值还是模拟」—— 说明 `AccountView` 的选中项没对齐
+           （只改了 key）→ 这里**每次都按身份重新对齐**；
+        2. 「首页在 快期模拟 / TqAccount 之间来回切」—— 说明"实盘是否可用"
+           这类判断在抖 → 这里不用可用性标记，只看**账户列表里有没有
+           `real:`**：有就对齐过去，没有就整齐地退回模拟（只记一次日志）✓
+        """
+        explicit = str(key or '').strip().lower()
+        if explicit:
+            # ★ 页面级核对：**只判断可用性，不改全局选中项** ✓
+            #   （否则两个图表页会互相抢全局 index → 数值串台 ✗）
+            if explicit == 'real':
+                items = self.account_catalog()
+                if any(item['key'] == 'real' and item['available']
+                       for item in items):
+                    return 'real'
+                return 'kq'
+            if explicit == 'kq':
+                items = self.account_catalog()
+                if any(item['key'] == 'kq' and item['available']
+                       for item in items):
+                    return 'kq'
+                return 'kq'
+            return explicit
+        key = self.active_account_key()
+        if key not in ('kq', 'real'):
+            return key
+        view = self.account_view()
+        if view is None:
+            return key
+        try:
+            identities = [str(item) for item in (view.identities() or [])]
+        except Exception:                                        # noqa: BLE001
+            identities = []
+        if not identities:
+            return key
+        real_identity = next(
+            (item for item in identities if item.startswith('real:')), '')
+        if key == 'real':
+            if not real_identity:
+                # 天勤里没有实盘账户 → 整齐退回模拟（只提示一次 ✓）
+                self._account_kind = 'kq'
+                if 'sim' in identities:
+                    try:
+                        view.switch_identity('sim')
+                    except Exception:                            # noqa: BLE001
+                        pass
+                if not getattr(self, '_no_real_warned', False):
+                    self._no_real_warned = True
+                    self.push_log(
+                        '天勤账户里没有实盘（TqAccount）→ 已回到快期模拟',
+                        'warning')
+                return 'kq'
+            try:
+                view.switch_identity(real_identity)
+            except Exception:                                    # noqa: BLE001
+                pass
+            return 'real'
+        if 'sim' in identities:
+            try:
+                view.switch_identity('sim')
+            except Exception:                                    # noqa: BLE001
+                pass
+        return 'kq'
+
+    def account_kind_payload(self) -> Dict[str, Any]:
+        """`account_kind` 补丁（两个下拉框都用它渲染 ✓）"""
+        items = self.account_catalog()
+        active = self._verified_account_key()
+        return {'type': 'account_kind', 'items': items, 'active': active,
+                'labels': [item['label'] for item in items],
+                'available': {item['key']: item['available']
+                              for item in items}}
+
+    def set_account_kind(self, key: str, page: str = '',
+                         cell=None) -> bool:
+        """切换账户 —— **首页 / 每个实时图表页各自独立** ✓
+
+        用户 2026-11-05（第二轮）：以前是全局切，首页切一下所有图表页都跟着变 ✗
+        → 现在 `page` 为空 = 只改首页；`page` = 页签 id（`chart:SHFE.ag2612`）
+          只改这一页，其它页面 / 首页不受影响 ✓
+
+        数据读取也不再依赖 `AccountView` 的全局选中项，而是**按 key 显式取**
+        （`AccountView.payload(..., key=)`），两个页面看不同账户也不会串 ✓
+        """
+        key = str(key or '').lower()
+        page = str(page or '')
+        items = {item['key']: item for item in self.account_catalog()}
+        if key not in items or not items[key]['available']:
+            self.push_log(f'账户不可用（没登录）：{key}', 'warning')
+            return False
+        if page:
+            has_cell = cell is not None and str(cell) != ''
+            symbol = (self._cell_symbol(page, cell) if has_cell
+                      else self._page_symbol(page))
+            if symbol:
+                stock = _is_stock(symbol)
+                if key == 'futu' and not stock:
+                    self.push_log(
+                        f'{symbol} 是期货 → 不能用「富途模拟」（只能交易股票）',
+                        'warning')
+                    self.push(_protocol.patch_toast(
+                        '富途模拟只能交易股票，期货请用 快期模拟 / TqAccount',
+                        'warning'))
+                    self._restore_account_kind(page)
+                    return False
+                if key in ('kq', 'real') and stock:
+                    self.push_log(
+                        f'{symbol} 是股票 → 「{items[key]["label"]}」只能交易期货',
+                        'warning')
+                    self.push(_protocol.patch_toast(
+                        '股票请切换到「富途模拟」', 'warning'))
+                    self._restore_account_kind(page)
+                    return False
+            store = (f'{page}#{int(cell)}' if has_cell else page)
+            previous = (self.account_key_for(store) if has_cell
+                        else self.account_key_for(page))
+            self._account_keys[store] = key
+        else:
+            previous = self.home_key()
+            self._home_key = key
+            # 首页的选择同时作为**全局默认**（新开的图表页跟着它起步 ✓）
+            self._account_kind = key
+        # 首页切换时把 `AccountView` 的选中项也对齐（老代码 / 实盘标记仍读它 ✓）
+        if not page and key in ('kq', 'real'):
+            view = self.account_view()
+            if view is not None:
+                identity = ''
+                try:
+                    identities = list(view.identities() or [])
+                except Exception:                                # noqa: BLE001
+                    identities = []
+                if key == 'kq':
+                    identity = 'sim' if 'sim' in identities else ''
+                else:
+                    identity = next((item for item in identities
+                                     if str(item).startswith('real:')), '')
+                if identity:
+                    try:
+                        view.switch_identity(identity)
+                    except Exception:                            # noqa: BLE001
+                        pass
+                elif key == 'real':
+                    self.push_log(
+                        '天勤里没有实盘账户（TqAccount），无法切到实盘', 'warning')
+                    return False
+        # TargetPosTask / 拒单回执按账户缓存 → 换账户必须清 ✓
+        trader = getattr(self, 'trader', None)
+        if trader is not None:
+            try:
+                trader.clear_account_cache()
+            except Exception:                                    # noqa: BLE001
+                pass
+        label = items[key]['label']
+        if key == previous:
+            # 已经就是这个账户 → 也给一句反馈（用户点了要有回应 ✓）
+            where = '首页' if not page else page.replace('chart:', '')
+            self.push_log(f'「{where}」当前已是 {label}', 'info')
+        if key != previous:
+            where = '首页' if not page else page.replace('chart:', '')
+            self.push_log(f'「{where}」交易账户 → {label}', 'info')
+        # ★ 顺序很重要：**先**账户数据，**最后** account_kind
+        #   （否则前端先拿到新 key + 旧数据，会闪一下 ✗）
+        active_cell = cell if (cell is not None and str(cell) != '') else None
+        symbol = ((self._cell_symbol(page, active_cell) if active_cell
+                   is not None else self._page_symbol(page))
+                  or next(iter(self.tabs), ''))
+        account = self.account_payload(symbol=symbol, key=key)
+        if symbol:
+            account['symbol'] = symbol              # 按页路由 ✓
+        if page:
+            account['page'] = page
+        if active_cell is not None:
+            account['cell'] = int(active_cell)
+        self.push(account)
+        state = self.trading_state(symbol)
+        state['key'] = key
+        if page:
+            state['page'] = page
+        self.push(state)
+        if not page:
+            self.push({'type': 'home_account', 'account': self.home_account()})
+        kind = self.account_kind_payload()
+        kind['active'] = key
+        if page:
+            kind['page'] = page
+        if active_cell is not None:
+            kind['cell'] = int(active_cell)
+        self.push(kind)
+        return True
+
+    #: 每个页面**焦点格**的合约（`{'chart:SHFE.ag2612': 'SH.600000'}`）
+    _focus_symbols: Dict[str, str] = {}
+
+    def _account_patch(self, symbol: str = '') -> Dict[str, Any]:
+        """当前页 / 指定合约的账户补丁（**带 page + cell** ✓）
+
+        多布局里每格账户可以不同（期货格 kq / 股票格 futu）→ 补丁必须说清
+        是哪一格的，否则前端会把格 2 的数据盖到格 1 的下拉框上 ✗
+        """
+        symbol = str(symbol or '') or next(iter(self.tabs), '')
+        page = f'chart:{symbol}'
+        focus = (getattr(self, '_focus_symbols', {}) or {}).get(page) or symbol
+        cell = self._cell_index_of(page, focus)
+        key = self.account_key_for(f'{page}#{cell}')
+        payload = self.account_payload(symbol=focus, key=key)
+        payload['symbol'] = focus
+        payload['page'] = page
+        payload['cell'] = int(cell)
+        return payload
+
+    #: 单图换标的时自动切账户（多布局不动 ✓）
+    AUTO_ACCOUNT_ON_SWITCH = True
+
+    def _auto_account_for_symbol(self, symbol: str) -> str:
+        """**单布局单图**换标的 → 按品种自动切账户 ✓
+
+        * 期货合约 → `kq`（快期模拟）；股票合约 → `futu`（富途模拟）
+        * **已经是那个账户就不动**（用户手选的实盘也不覆盖 ✓）
+        * 多布局（>1 格）不在这里改：每格账户各自独立、由用户自己切 ✓
+        返回最终的 key。
+        """
+        symbol = str(symbol or '')
+        if not symbol or not self.AUTO_ACCOUNT_ON_SWITCH:
+            return ''
+        page = f'chart:{symbol}'
+        info = self.tabs.get(symbol) or {}
+        symbols = [str(item or '')
+                   for item in ((info.get('layout') or {}).get('symbols') or [])]
+        if len(symbols) > 1:
+            return self.account_key_for(f'{page}#0')      # 多布局 → 不自动切
+        wanted = 'futu' if _is_stock(symbol) else 'kq'
+        cell_key = f'{page}#0'
+        current = self._account_keys.get(cell_key)             or self._account_keys.get(page) or ''
+        if current == wanted:
+            return wanted
+        # 目标账户没登录 → 不要硬切（保持现状，日志里说一声 ✓）
+        catalog = {item['key']: item for item in self.account_catalog()}
+        if not catalog.get(wanted, {}).get('available'):
+            if current:
+                return current
+            return ''
+        self._account_keys[cell_key] = wanted
+        self._account_keys.pop(page, None)
+        label = catalog[wanted]['label']
+        self.push_log(
+            f'{symbol} 是{"股票" if wanted == "futu" else "期货"} → '
+            f'交易账户切到「{label}」', 'info')
+        # 立刻把这一页的账户数据 + 目录 + 交易状态推过去（下拉框 / 卡片同步 ✓）
+        self._push_cell_account(page, symbol)
+        return wanted
+
+    def _push_cell_account(self, page: str, symbol: str) -> None:
+        """把「这一格」的账户数据 + 账户目录 + 交易状态推过去 ✓
+
+        多布局里第 1 格是期货、第 2 格是股票时，账户必须**按格**区分
+        （用户 2026-11-05 提问：多布局能不能自由切股票 / 期货账户）。
+        """
+        page = str(page or '')
+        symbol = str(symbol or '')
+        if not page or not symbol:
+            return
+        cell = self._cell_index_of(page, symbol)
+        key = self.account_key_for(f'{page}#{cell}')
+        try:
+            account = self.account_payload(symbol=symbol, key=key)
+            account['symbol'] = symbol
+            account['page'] = page
+            account['cell'] = int(cell)
+            self.push(account)
+        except Exception:                                        # noqa: BLE001
+            pass
+        kind = self.account_kind_payload()
+        kind['page'] = page
+        kind['cell'] = int(cell)
+        kind['active'] = key
+        self.push(kind)
+        state = self.trading_state(symbol)
+        state['page'] = page
+        state['cell'] = int(cell)
+        self.push(state)
+
+    def _restore_account_kind(self, page: str) -> None:
+        """拒绝切换后：把这一页的下拉框**恢复成真实账户**（别停在错误值 ✗）"""
+        kind = self.account_kind_payload()
+        kind['page'] = str(page or '')
+        kind['active'] = self.account_key_for(page)
+        self.push(kind)
+        symbol = self._page_symbol(page)
+        if not symbol:
+            return
+        try:
+            payload = self.account_payload(
+                symbol=symbol, key=self.account_key_for(page))
+            payload['symbol'] = symbol
+            payload['page'] = str(page or '')
+            self.push(payload)
+        except Exception:                                        # noqa: BLE001
+            pass
+
+    def _page_symbol(self, page: str) -> str:
+        """页签 id → 合约（`chart:SHFE.ag2612` → `SHFE.ag2612`）✓"""
+        text = str(page or '')
+        if text.startswith('chart:'):
+            return text[len('chart:'):]
+        if text.startswith('local:'):
+            return text[len('local:'):]
+        return text
+
     def home_account(self) -> Dict[str, Any]:
         """首页账户卡：快期模拟 / 富途模拟可切换 ✓
 
         两个账户可能同时在线；账户卡用 `home_account_kind` 决定显示哪个。
         没登录的那个选项不可用（前端置灰）。
         """
-        futures_on = bool(self.futures and self.futures.available())
-        stocks_on = bool(self.stocks and self.stocks.available())
-        choices = [
-            {'kind': 'futures', 'label': '快期模拟', 'available': futures_on},
-            {'kind': 'stocks', 'label': '富途模拟', 'available': stocks_on},
-        ]
-        selected = str(getattr(self, '_home_account_kind', 'futures')
-                       or 'futures')
-        available = {item['kind'] for item in choices if item['available']}
-        if selected not in available:
-            selected = ('futures' if futures_on else
-                        ('stocks' if stocks_on else 'futures'))
+        catalog = self.account_catalog()
+        active_key = self.home_key()
+        futures_on = any(item['available'] for item in catalog
+                         if item['kind'] == 'futures')
+        stocks_on = any(item['available'] for item in catalog
+                        if item['kind'] == 'stocks')
+        # ★ 选项 = **统一目录**（快期模拟 / 富途模拟 / TqAccount）✓
+        choices = [{'key': item['key'], 'label': item['label'],
+                    'kind': item['kind'], 'available': item['available']}
+                   for item in catalog]
+        # ★ 一律以 `active_account_key()` 为准（它已经保证是"可用"的 key）——
+        #   以前这里还有一层 `selected not in available` 的兜底，会把 selected
+        #   改回 futures，而 key 仍是 real → 标签是实盘、数值是模拟 ✗
+        selected = 'stocks' if active_key == 'futu' else 'futures'
         self._home_account_kind = selected
+        stock_symbol_default = 'SH.600000'
+        futures_symbol_default = HOME_FUTURES_INDICES[0][0]
         view = self.account_view()
         summary: Dict[str, Any] = {}
         if view is not None:
@@ -1388,36 +1913,69 @@ class Desk:
                 if selected == 'futures':
                     symbol = next((name for name in self.tabs
                                    if not _is_stock(name)),
-                                  HOME_FUTURES_INDICES[0][0])
-                    summary = view.summary(symbol)
+                                  futures_symbol_default)
+                    summary = view.summary(symbol, active_key)
                 else:
                     symbol = next((name for name in self.tabs
-                                   if _is_stock(name)), 'SH.600000')
-                    summary = view.summary(symbol)
-            except Exception:                                    # noqa: BLE001
+                                   if _is_stock(name)), stock_symbol_default)
+                    summary = view.summary(symbol, active_key)
+            except Exception as error:                           # noqa: BLE001
+                self.push_log(
+                    f'读取账户摘要失败（{selected}）：{error!r}', 'warning')
                 summary = {}
         label = next((item['label'] for item in choices
-                      if item['kind'] == selected), '快期模拟')
+                      if item['key'] == active_key), '快期模拟')
         result = dict(summary or {})
         result.update({
             'kind': selected,
+            'key': active_key,
             'label': label,
             'labels': [item['label'] for item in choices],
-            'index': 0 if selected == 'futures' else 1,
+            'index': [item['key'] for item in choices].index(active_key)
+                     if active_key in [item['key'] for item in choices] else 0,
             'choices': choices,
+            'active': active_key,
         })
         return result
 
+    def _on_set_account_kind(self, payload=None) -> None:
+        """切换账户（**按页面独立**：`page` = 页签 id，空 = 首页 ✓）"""
+        payload = payload or {}
+        key = str(payload.get('key') or payload.get('kind') or '').lower()
+        page = str(payload.get('page') or '')
+        cell = payload.get('cell')
+        self.set_account_kind(key, page, cell)
+        if not page:
+            self.push({'type': 'home_account',
+                       'account': self.home_account()})
+
+    def _on_account_kind(self, payload=None) -> None:
+        """前端要账户目录（首页 / 某一页的当前 key ✓）"""
+        payload = payload or {}
+        page = str(payload.get('page') or '')
+        cell = payload.get('cell')
+        kind = self.account_kind_payload()
+        if page:
+            kind['page'] = page
+            has_cell = cell is not None and str(cell) != ''
+            kind['active'] = self.account_key_for(
+                f'{page}#{int(cell)}' if has_cell else page)
+            if has_cell:
+                kind['cell'] = int(cell)
+        self.push(kind)
+
     def _on_home_account_kind(self, payload=None) -> None:
-        """首页账户卡切换快期模拟 / 富途模拟 ✓"""
-        kind = str((payload or {}).get('kind') or '').lower()
-        if kind not in ('futures', 'stocks'):
-            return
-        if kind == 'futures' and not (self.futures and self.futures.available()):
-            return
-        if kind == 'stocks' and not (self.stocks and self.stocks.available()):
-            return
-        self._home_account_kind = kind
+        """首页账户卡切换账户（快期模拟 / 富途模拟 / TqAccount ✓）
+
+        兼容旧写法：`kind` = futures / stocks；新写法：`key` = kq / futu / real ✓
+        """
+        payload = payload or {}
+        key = str(payload.get('key') or '').lower()
+        if not key:
+            kind = str(payload.get('kind') or '').lower()
+            key = 'futu' if kind == 'stocks' else 'kq'
+        # ★ 首页下拉框**只切首页**（不影响任何图表页 ✓ 用户 2026-11-05）
+        self.set_account_kind(key, '')
         self.push({'type': 'home_account', 'account': self.home_account()})
 
     def home_payload(self, *, full: bool = True,
@@ -2092,13 +2650,19 @@ class Desk:
         info['_kline_time'] = int((bars[-1].get('time') if bars else 0) or 0)
         info['_kline_close'] = float(
             (bars[-1].get('close') if bars else 0.0) or 0.0)
+        # ★ 高 / 低也要记：一字线被撑开时**收盘价可能没变**（用户 2026-11-05）
+        info['_kline_high'] = float(
+            (bars[-1].get('high') if bars else 0.0) or 0.0)
+        info['_kline_low'] = float(
+            (bars[-1].get('low') if bars else 0.0) or 0.0)
         info['_kline_at'] = time.monotonic()
 
     @staticmethod
     def _reset_kline_state(info: dict) -> None:
         """下一拍必须**全量**重推（切周期 / 换合约 / 重登行情源 ✓）"""
         for key in ('_kline_frame_len', '_kline_bars_len', '_kline_first_time',
-                    '_kline_time', '_kline_close', '_kline_at'):
+                    '_kline_time', '_kline_close', '_kline_high', '_kline_low',
+                    '_kline_at'):
             info.pop(key, None)
 
     def decimals_of(self, symbol: str, default: int = 2) -> int:
@@ -2420,6 +2984,81 @@ class Desk:
         if updates:
             self.push(_protocol.patch_rows_update(updates))
 
+    #: 行情「卡住」多久算异常（秒）—— 午休 / 收盘 / 断线都会停更 ✓
+    STALE_AFTER = 25.0
+
+    @staticmethod
+    def _looks_like_session(now: float = None) -> bool:
+        """现在像不像**交易时段**（周一到周五，09:00–15:00 / 21:00–次日 02:30）✓
+
+        只用来决定"要不要提示行情停了"，不参与任何交易逻辑 ✓
+        """
+        stamp = time.localtime(time.time() if now is None else now)
+        if stamp.tm_wday >= 5:                       # 周六 / 周日
+            return False
+        minutes = stamp.tm_hour * 60 + stamp.tm_min
+        return (9 * 60 <= minutes <= 15 * 60) or (21 * 60 <= minutes
+                                                  or minutes <= 150)
+
+    def _watch_market_resume(self, symbol: str, info: dict) -> None:
+        """行情**停更 / 恢复**监控（用户实测 2026-11-03 ✗）
+
+        午休（11:30–13:00）后，天勤的 K 线 / 报价会恢复推送；但 desk 只按
+        "最后一根 K 线有没有变"判断要不要补数据，一旦某段时间里 tqsdk 没把
+        新 bar 推上来（或 `wait_update` 那次丢了），图就会**冻在上午的价格**，
+        用户看到的"现价"其实是上午的 → 误判盈亏 ✗。
+
+        这里按「最后一根 bar 多久没动」判断：
+
+        * 超过 `STALE_AFTER` 秒 → 记一笔日志（**只记一次**，不刷屏）；
+        * 之后数据又动了（`_kline_at` 被刷新）→ **全量重拉**这一页的 K 线，
+          并提示「行情已恢复」（相当于开盘自动补数据 ✓）。
+        """
+        last = float(info.get('_kline_at') or 0.0)
+        if not last:
+            return
+        idle = time.monotonic() - last
+        stale = bool(info.get('_market_stale'))
+        if idle > self.STALE_AFTER:
+            if not stale:
+                info['_market_stale'] = True
+                info['_market_stale_at'] = time.monotonic()
+                if self._looks_like_session():
+                    self.push_log(
+                        f'{symbol} 行情已 {int(idle)} 秒没有更新（休市 / 断线？）',
+                        'warning')
+            return
+        if not stale:
+            return
+        # ★ 恢复了：清标记 + 全量重拉（`_reset_kline_state` 保证整帧重推 ✓）
+        info['_market_stale'] = False
+        paused = time.monotonic() - float(info.get('_market_stale_at') or 0.0)
+        if paused < 1.0:
+            return
+        self.push_log(f'{symbol} 行情已恢复（停更 {int(paused)} 秒），重新拉取数据',
+                      'success')
+        self.push(_protocol.patch_toast(
+            f'{symbol} 行情已恢复，正在补齐数据…', 'info'))
+        self._reload_tab_klines(symbol, info)
+
+    def _reload_tab_klines(self, symbol: str, info: dict) -> None:
+        """**只**重拉某一个 tab 的 K 线（行情恢复 / 断线重连 ✓）"""
+        feed = info.get('feed') or pick_feed(self.feeds, symbol)
+        if feed is None:
+            return
+        cycle = int(info.get('cycle') or 60)
+        frame = feed.klines(symbol, cycle, self.tab_length(info))
+        bars = _protocol.bars_from_frame(frame) if frame is not None else []
+        self._reset_kline_state(info)
+        if bars:
+            self._note_kline_state(
+                info, bars, len(frame) if frame is not None else 0)
+            self.push(_protocol.patch_kline(symbol, bars, True))
+        # 格子（多布局）也要重拉，否则第 2..N 格还停在旧价格 ✓
+        state = info.get('_cell_state')
+        if isinstance(state, dict):
+            state.clear()
+
     def _refresh_tabs(self) -> None:
         if self._quotes_blocked():
             return
@@ -2448,6 +3087,8 @@ class Desk:
             if feed is None:
                 continue
             length = self.tab_length(info)
+            # ★ 早于取数：先看行情有没有停更 / 刚恢复（恢复时立刻全量重拉 ✓）
+            timed('resume', lambda: self._watch_market_resume(symbol, info))
             frame = timed('klines', lambda: feed.klines(
                 cell0_symbol, info.get('cycle') or 60, length))
             frame_len = len(frame) if frame is not None else 0
@@ -2468,8 +3109,12 @@ class Desk:
                 # 用 full_replace 把完整历史补上 ✓
                 last_time = int(bars[-1].get('time') or 0)
                 last_close = float(bars[-1].get('close') or 0.0)
+                last_high = float(bars[-1].get('high') or 0.0)
+                last_low = float(bars[-1].get('low') or 0.0)
                 if full_replace or (last_time != info.get('_kline_time')
                         or last_close != info.get('_kline_close')
+                        or last_high != info.get('_kline_high')
+                        or last_low != info.get('_kline_low')
                         or time.monotonic()
                         - float(info.get('_kline_at') or 0) >= 1.0):
                     if full_replace:
@@ -2477,6 +3122,8 @@ class Desk:
                     else:
                         info['_kline_time'] = last_time
                         info['_kline_close'] = last_close
+                        info['_kline_high'] = last_high
+                        info['_kline_low'] = last_low
                         info['_kline_at'] = time.monotonic()
                     payload = _protocol.patch_kline(
                         symbol, bars if full_replace else bars[-2:],
@@ -2484,7 +3131,14 @@ class Desk:
                     if cell0_symbol != symbol:
                         payload['cell'] = 0
                     timed('kline_push', lambda: self.push(payload))
-            book = timed('book', lambda: self.book_payload(cell0_symbol, feed))
+            # ★ 二级报价推送**焦点合约**（鼠标最后点的那一格），不是格 1 ✗
+            page_id = f'chart:{symbol}'
+            focus_symbol = self._book_focus.get(page_id) or cell0_symbol
+            focus_feed = (pick_feed(self.feeds, focus_symbol) or feed)
+            book = timed('book', lambda: self.book_payload(
+                focus_symbol, focus_feed))
+            book['symbol'] = focus_symbol
+            book['page'] = page_id
             timed('book_push', lambda: self.push(book))
             position = timed('position', lambda: self.position_payload(
                 cell0_symbol, feed))
@@ -2637,7 +3291,7 @@ class Desk:
                     'success' if item.get('ok') else 'warning'))
             if fired:
                 self.push(bench.snapshot())
-                self.push(self.account_payload(symbol=next(iter(self.tabs), '')))
+                self.push(self._account_patch())
         ops = self._ops
         if ops is not None:
             try:
@@ -2679,10 +3333,12 @@ class Desk:
         trader = self.trading_view()
         feed = self.feed_of(symbol) if symbol else self.current_feed()
         enabled = bool(trader is not None and trader.ready(symbol))
+        page_key = self.account_key_for(f'chart:{symbol}' if symbol else '')
         return {'type': 'trading', 'symbol': symbol, 'enabled': enabled,
                 'real': bool(trader is not None and trader.is_real(symbol)),
                 'kind': 'stocks' if getattr(feed, 'kind', '') == 'stocks'
                         else 'futures',
+                'key': page_key,
                 'account': trader.account_label(symbol) if trader else ''}
 
     # -------------------------------------------------------- 账户面板
@@ -2704,7 +3360,8 @@ class Desk:
                 return None
         return self.accounts
 
-    def account_payload(self, limit: int = 100, symbol: str = ''):
+    def account_payload(self, limit: int = 100, symbol: str = '',
+                        key: str = ''):
         """账户 / 持仓 / 委托 / 成交（跟**看盘 tab 的合约**走 ✓）
 
         以前没有 `symbol` → `AccountView.api()` 用报价页筛选：
@@ -2720,7 +3377,9 @@ class Desk:
         if view is None:
             return {'type': 'account', 'empty': True}
         try:
-            return view.payload(limit, symbol)
+            return view.payload(limit, symbol,
+                                key or self.account_key_for(
+                                    f'chart:{symbol}' if symbol else ''))
         except Exception as error:                               # noqa: BLE001
             print(f'[desk] 账户数据失败: {error!r}')
             return {'type': 'account', 'empty': True}
@@ -2733,7 +3392,9 @@ class Desk:
         if now - self._dock_at < 1.0:
             return
         self._dock_at = now
-        self.push(self.account_payload(symbol=next(iter(self.tabs), '')))
+        # ★ 每个页签按**自己的**账户 key 推（标题 / 数值都各归各 ✓）
+        for symbol in list(self.tabs)[:6]:
+            self.push(self._account_patch(symbol))
         # ★ 挂单线：看盘窗口里每个 tab 的合约都推一次（上限 6 个 ✓）
         for symbol in list(self.tabs)[:6]:
             if symbol in self.replay_symbols:
@@ -3126,7 +3787,8 @@ class Desk:
         self.push(self.indicator_payload(symbol, frame=frame))
     # -------------------------------------------------------- 二级报价
     # -------------------------------------------------------- 二级报价
-    def book_payload(self, symbol: str, feed=None) -> Dict[str, Any]:
+    def book_payload(self, symbol: str, feed=None,
+                     ticks: bool = True) -> Dict[str, Any]:
         """5 档买卖 + 12 个字段 + 分笔（股票只有 1 档 ✓）"""
         feed = feed or pick_feed(self.feeds, symbol) or self.current_feed()
         payload: Dict[str, Any] = {
@@ -3162,7 +3824,10 @@ class Desk:
             payload['asks'] = pair('ask_price%d', 'ask_volume%d')
             payload['bids'] = pair('bid_price%d', 'bid_volume%d')
         payload['info'] = _book_info(quote)
-        payload['ticks'] = self._book_ticks(feed, symbol)
+        # ★ 每格买卖盘只需要买一/卖一 + 点差 → 不算分笔（`get_tick_serial`
+        #   在大连接上是**同步阻塞**的，多格 × 每拍会把界面拖死 ✗）
+        if ticks:
+            payload['ticks'] = self._book_ticks(feed, symbol)
         return payload
 
     def _book_ticks(self, feed, symbol: str, limit: int = 14) -> List[dict]:
@@ -3177,8 +3842,12 @@ class Desk:
         getter = getattr(api, 'get_tick_serial', None)
         if not callable(getter):
             return []
+        # ★ 走 `_fast_call`：把内部的 `wait_update` 换成立即返回，
+        #   否则服务器维护 / 未订阅时**卡 158 秒**（用户实测 2026-11-05 ✗）；
+        #   分笔晚一拍出来没关系，界面不能卡 ✓
+        fast = getattr(feed, '_fast_call', None)
         try:
-            frame = getter(symbol)
+            frame = fast(getter, symbol) if callable(fast) else getter(symbol)
         except Exception:                                        # noqa: BLE001
             return []
         if frame is None:
@@ -3269,11 +3938,12 @@ class Desk:
             row, ('pos_short', 'volume_short'))) or 0.0
         if long_volume <= 0 and short_volume <= 0:
             return payload
+        # ★ 成本价用 `position_price_*`（真实持仓均价），不是 `open_price_*` ✗
         payload['long'] = _position_side(
-            row, long_volume, ('open_price_long', 'position_price_long'),
+            row, long_volume, ('position_price_long', 'open_price_long'),
             ('float_profit_long', 'position_profit_long'), '多')
         payload['short'] = _position_side(
-            row, short_volume, ('open_price_short', 'position_price_short'),
+            row, short_volume, ('position_price_short', 'open_price_short'),
             ('float_profit_short', 'position_profit_short'), '空')
         # ★ 某些账户/交易所的持仓成本字段会是 NaN / 0（尤其刚成交那拍）
         #   → 前端 `!!side.avg` 会把整条持仓线过滤掉。这里退回最新价，
@@ -3293,6 +3963,8 @@ class Desk:
             'home_refresh': self._on_home_refresh,  # 首页手动刷新
             'home_symbols': self._on_home_symbols,  # 自定义分组的合约
             'home_account_kind': self._on_home_account_kind,
+            'set_account_kind': self._on_set_account_kind,
+            'account_kind': self._on_account_kind,
             'strategy_start': self._on_strategy_start,   # 策略回测 / 优化
             'strategy_select': self._on_strategy_select,  # 切策略 / 合约
             'strategy_indicator_params': self._on_strategy_indicator_params,
@@ -3312,6 +3984,10 @@ class Desk:
             'row_click': self._on_row_click,
             'context_menu': self._on_context_menu,
             'book': self._on_book,                    # 前端要求立刻刷一次
+            'book_watch': self._on_book_watch,        # 某格买卖盘 👁 开 / 关
+            'ui_stall': self._on_ui_stall,            # 前端卡顿自测心跳 ✓
+            'order_detail': self._on_order_detail,    # 改单窗口预填 ✓
+            'order_modify': self._on_order_modify,    # 撤旧单 + 重下 ✓
             'account': self._on_account,              # 前端要求立刻刷一次
             'reload_contracts': self._on_reload_contracts,
             'quote_chips': self._on_quote_chips,
@@ -3421,6 +4097,7 @@ class Desk:
             'open_url': self._on_open_url,          # 设置页「帮助 / 反馈」✓
             # ---- 登录（离线也能连上服务 ✓）----
             'login_info': self._on_login_info,        # 读记住的账号（预填 ✓）
+            'login_save': self._on_login_save,        # 边填边存（关窗也不丢 ✓）
             # ---- 收藏 / 自选分组（落盘到 prefs，重启还在 ✓）----
             'watch_get': self._on_watch_get,
             'watch_set': self._on_watch_set,
@@ -3493,10 +4170,21 @@ class Desk:
         payload = _protocol.decode_command(message)
         if not payload:
             return None
-        handler = self.commands().get(str(payload.get('cmd') or ''))
+        cmd = str(payload.get('cmd') or '')
+        handler = self.commands().get(cmd)
         if handler is None:
             return None
-        return handler(payload.get('payload') or {})
+        # ★ 记下"用户刚操作过"：后台重活（合约索引）要避开这段时间 ✓
+        self._last_cmd_at = time.monotonic()
+        started = time.monotonic()
+        try:
+            return handler(payload.get('payload') or {})
+        finally:
+            spent = time.monotonic() - started
+            if spent > 1.0 and not os.environ.get('PYTEST_CURRENT_TEST'):
+                # 命令处理里做重活 = 界面卡顿；记下来（含耗时 ✓）
+                # （pytest 里不写：会给"取最后一条补丁"的测试添乱，也没意义 ✓）
+                self.push_log(f'[性能] 命令 {cmd} 耗时 {spent:.2f}s', 'warning')
 
     #: 「设置 → 关于」里的链接（帮助 / 反馈 / 官网）
     HOME_URL = 'https://www.minibt.cn'
@@ -3559,6 +4247,20 @@ class Desk:
         self.push(_protocol.patch_login(kind, 'info',
                                         saved=self.login_payload(kind)))
 
+    def _on_login_save(self, payload=None) -> None:
+        """登录框**边填边存**（`onDirty` → 400ms 防抖 / 关窗前再存一次 ✓）
+
+        用户 2026-11-05：以前只有点「登录」才保存 → 填完直接关窗、
+        或者登录校验没过就退出，下次打开**还是空的** ✗
+        """
+        payload = payload or {}
+        kind = 'stocks' if str(payload.get('kind')) == 'stocks' else 'futures'
+        values = payload.get('values')
+        if not isinstance(values, dict):
+            return
+        # 交易密码永远不落盘（`user_prefs.LOGIN_FIELDS` 会过滤 ✓）
+        self._login_saved(kind, values)
+
     def _login_saved(self, kind: str, values: Dict[str, Any]) -> None:
         """落盘记住的信息（失败不影响登录 ✓）"""
         try:
@@ -3568,10 +4270,42 @@ class Desk:
             pass
 
     def _login_failed(self, kind: str, text: str) -> None:
-        """登录失败：登录框 + 运行日志 + toast 都说清楚 ✓"""
+        """登录失败：登录框 + 运行日志 + toast + **模态弹窗**都说清楚 ✓
+
+        用户 2026-11-05：实盘登录没选期货公司，连不上却"没有任何提醒"
+        → 连试几次都失败。现在失败一定弹一个模态框（要先看到才会去改）✓
+        """
+        text = str(text or '') or '登录失败（原因未知）'
         self.push(_protocol.patch_login(kind, 'error', ok=False, text=text))
         self.push_log(text, 'error')
         self.push(_protocol.patch_toast(text, 'error'))
+        title = '期货登录失败' if kind == 'futures' else '股票连接失败'
+        try:
+            self.push_alert(title, text,
+                            detail=self._login_hint(kind, text), level='error')
+        except Exception:                                        # noqa: BLE001
+            pass
+
+    @staticmethod
+    def _login_hint(kind: str, text: str = '') -> str:
+        """把常见报错翻译成"下一步该改什么" ✓"""
+        body = str(text or '')
+        tips = []
+        if kind == 'futures':
+            if '期货公司' in body or 'broker' in body.lower():
+                tips.append('实盘要选**期货公司**（下拉框别留空）')
+            if any(key in body for key in ('交易密码', 'trade_password')):
+                tips.append('实盘交易密码**每次都要重新输入**（不保存）')
+            if any(key in body for key in ('资金账号', 'account')):
+                tips.append('实盘要填**资金账号**')
+            if any(key in body for key in ('密码', 'password', 'auth')):
+                tips.append('检查天勤账号 / 密码')
+            if any(key in body.lower() for key in ('network', 'timeout',
+                                                   'connection', '连接')):
+                tips.append('检查网络 / 天勤服务器状态')
+        else:
+            tips.append('确认 FutuOpenD 已启动并登录，端口默认 11111')
+        return '；'.join(dict.fromkeys(tips))
 
     def _after_connect(self, kind: str, text: str) -> None:
         """连上行情源之后：菜单 / 首页 / 报价 / 图表 / 账户 全刷一遍 ✓
@@ -3589,7 +4323,21 @@ class Desk:
         self.offline = False
         self.trader = None                 # 交易执行器按新 feeds 重建 ✓
         self.accounts = None               # 账户面板同上
+        if kind == 'futures':
+            # ★ 按身份恢复"当前账户"（例如之前停在实盘 → 重连后仍是实盘 ✓）
+            identity = str(getattr(self, '_preferred_identity', '') or '')
+            view = self.account_view()
+            if view is not None and identity:
+                try:
+                    view.switch_identity(identity)
+                except Exception:                                # noqa: BLE001
+                    pass
         self.push(_protocol.patch_markets(self.market_map()))
+        # ★ 账户目录（快期模拟 / 富途模拟 / TqAccount）→ 首页 + 交易账户页 ✓
+        try:
+            self.push(self.account_kind_payload())
+        except Exception:                                        # noqa: BLE001
+            pass
         self.push(_protocol.patch_login(kind, 'ok', ok=True, text=text))
         self.push_log(text, 'success')
         self.push(_protocol.patch_toast(text, 'success'))
@@ -3600,12 +4348,51 @@ class Desk:
             except Exception:                                    # noqa: BLE001
                 pass
         try:
-            self.push(self.account_payload())
+            # ★ 必须带 `symbol` / `page`：不带的话前端会当成"全局账户数据"
+            #   刷到**所有**页面 → 连了富途后，期货图表页显示股票账户的
+            #   资金和持仓（用户 2026-11-05 截图 ✗）
+            active_symbol = next(iter(self.tabs), '')
+            payload = self.account_payload(
+                symbol=active_symbol,
+                key=self.account_key_for(f'chart:{active_symbol}'
+                                         if active_symbol else ''))
+            if active_symbol:
+                payload['symbol'] = active_symbol
+                payload['page'] = f'chart:{active_symbol}'
+            self.push(payload)
         except Exception:                                        # noqa: BLE001
             pass
         self.push(self.trading_state(next(iter(self.tabs), '')))
-        if self.tabs:                      # 离线时打开的图：补上数据 ✓
-            self._reload_klines()
+        # ★ 换账户：关掉旧连接（主线程，api 也是主线程建的 ✓）并重订阅
+        old_feed = getattr(self, '_old_feed_pending', None)
+        self._old_feed_pending = None
+        if old_feed is not None:
+            try:
+                old_feed.close()
+            except Exception as error:                           # noqa: BLE001
+                print(f'[desk] 关闭旧行情源失败: {error!r}')
+            self.push_log(
+                f'已切换到账户：{account_fp_label(tuple(self._account_fp or ()))}'
+                '（图表正在重新订阅）', 'success')
+            self.push(_protocol.patch_toast(
+                f'账户已切换：{account_fp_label(tuple(self._account_fp or ()))}',
+                'success'))
+            # 二级报价 / 买卖盘重新订阅（焦点按当前 tab 重算 ✓）
+            seen = getattr(self, '_book_seen', None)
+            if isinstance(seen, dict):
+                seen.clear()
+            self._book_at = 0.0
+            self._push_book_watch(force=True)
+        if self.tabs:
+            # ★ 离线时打开的图要补数据，但**不要**在这里同步拉（用户实测：
+            #   登录后界面卡 1~2 分钟 ✗）。这里只把状态标脏，`_refresh_tabs`
+            #   下一拍各自全量重推 —— 每拍只处理一个 tab，界面保持响应 ✓
+            for info in self.tabs.values():
+                try:
+                    self._reset_kline_state(info or {})
+                except Exception:                            # noqa: BLE001
+                    pass
+            self.push_log('已连上行情：图表正在后台补齐数据…', 'info')
 
     def _run_connect(self) -> None:
         """在**主线程**建立行情连接（`TqApi` / `StockApi` 只能在创建线程用 ✓）
@@ -3652,13 +4439,36 @@ class Desk:
                     target = TqKq()
                 api = TqApi(target, auth=auth)
                 self._real_account = bool(params.get('real'))
-                # 实盘登录默认选中实盘账户（index 1）；仍可在账户页切回模拟
+                # ★ 记一笔"本次登录带实盘"（判可用性用，不依赖 proxy api ✓）
+                self._real_login = bool(params.get('real'))
+                # 首选账户：**按身份**保留（重连后 `_account_list` 下标会变 ✓）
+                preferred_identity = str(params.get('_preferred_identity') or '')
                 self._preferred_account_index = (
                     1 if params.get('real') else 0)
+                # ★ 换账户：先记下旧 feed（**主线程**再 close，别跨线程碰 tqsdk ✗）
+                old_feed = self.futures
                 self.accounts = None
                 feed = FuturesFeed(api, 'futures')
                 self.futures = feed
-                self.feeds.insert(0, feed)
+                # ★ 新 feed 放最前，其余**同一类**的旧 feed 直接摘掉（不留僵尸 ✓）
+                self.feeds = [feed] + [
+                    item for item in self.feeds
+                    if item is not old_feed and item is not feed
+                    and getattr(item, 'kind', '') != 'futures']
+                if old_feed is not None and old_feed is not feed:
+                    self._old_feed_pending = old_feed
+                # ★ 换账户 → 清掉按账户缓存的交易状态（详见 trading）✓
+                self._account_fp = tuple(params.get('_fp') or ())
+                for name in ('_book_focus', '_book_watch', '_book_seen',
+                             '_book_cache'):
+                    holder = getattr(self, name, None)
+                    if isinstance(holder, dict):
+                        holder.clear()
+                self._book_at = 0.0
+                self._reset_trade_caches()
+                # 首选账户身份（换账户前选的是谁，重连后仍选谁 ✓）
+                self._preferred_identity = preferred_identity or (
+                    'sim' if not params.get('real') else '')
                 # 新连接：清掉上一轮“空合约跳过”的缓存，允许自动重试 ✓
                 try:
                     self._skip_markets.clear()
@@ -3671,9 +4481,15 @@ class Desk:
                     'futures', f"天勤已连接：{params['username']}（{label}）")
             else:
                 from ..stock_api import StockApi
+                # ★ 模拟盘一定要连**富途官方模拟账户**（`trd_env=SIMULATE`）：
+                #   以前"启用交易"没勾就退回本地记账 → 持仓 / 权益和富途 App
+                #   对不上（用户 2026-11-06 截图 ✗）。模拟盘不涉及真钱 ✓
+                trade_env = str(params.get('trd_env') or 'SIMULATE').upper()
+                want_trade = (bool(params.get('trade'))
+                              or trade_env == 'SIMULATE')
                 api = StockApi(host=params['host'], port=params['port'],
-                               trade=bool(params.get('trade')),
-                               trd_env=str(params.get('trd_env') or 'SIMULATE'),
+                               trade=want_trade,
+                               trd_env=trade_env,
                                trd_market=str(params.get('trd_market')
                                               or 'CN'),
                                sim_account='desk')
@@ -3719,22 +4535,62 @@ class Desk:
         broker = str(payload.get('broker') or '').strip()
         account = str(payload.get('account') or '').strip()
         trade_password = str(payload.get('trade_password') or '')
-        if not username or not password:
-            self._login_failed('futures', '天勤账号和密码都要填 ✓')
+        # ★ 先落盘已填内容（用户名 / 实盘 / 期货公司 / 资金账号）→ 下次预填 ✓
+        #   （交易密码不进 prefs，见 `user_prefs.LOGIN_FIELDS` ✓）
+        self._login_saved('futures', {
+            'username': username, 'remember': bool(payload.get('remember')),
+            'real': real, 'broker': broker, 'account': account,
+            'password': password if payload.get('remember') else '',
+        })
+        # ★ 落盘后把"记住的内容"推回前端 → 再打开登录框一定有数据 ✓
+        self.push(_protocol.patch_login('futures', 'info',
+                                        saved=self.login_payload('futures')))
+        if not username:
+            self._login_failed('futures', '请填写天勤**用户名**（手机号 / 邮箱）')
             return
-        if real and not (broker and account and trade_password):
-            self._login_failed('futures', '实盘账户需要期货公司 / 资金账号 / 交易密码')
+        if not password:
+            self._login_failed('futures', '请填写天勤**登录密码**')
             return
+        if real:
+            missing = []
+            if not broker:
+                missing.append('期货公司')
+            if not account:
+                missing.append('资金账号')
+            if not trade_password:
+                missing.append('交易密码（每次都要输入）')
+            if missing:
+                self._login_failed(
+                    'futures',
+                    '实盘账户缺少：' + ' / '.join(missing) + '，请补齐后再登录')
+                return
+        new_fp = account_fingerprint({'username': username, 'real': real,
+                                      'broker': broker, 'account': account})
         if self.futures is not None and self.futures.available():
-            self.push(_protocol.patch_login(
-                'futures', 'ok', ok=True, text='期货已经连上了（无需重复登录）'))
-            return
+            if new_fp == tuple(self._account_fp or ()):
+                # ★ 同一组账户 → 什么都不做（用户 2026-11-05 确认的规则 ✓）
+                self.push(_protocol.patch_login(
+                    'futures', 'ok', ok=True,
+                    text=f'已是当前账户：{account_fp_label(new_fp)}'
+                         '（无需重复登录）'))
+                self.push_log('登录信息未变化，保持当前连接', 'info')
+                return
+            switch = True
+            self.push_log(
+                f'切换天勤账户：{account_fp_label(tuple(self._account_fp or ()))}'
+                f' → {account_fp_label(new_fp)}', 'info')
+        else:
+            switch = False
         login_values = {
             'username': username, 'password': password,
             'remember': bool(payload.get('remember')),
             'real': real, 'broker': broker, 'account': account,
             'trade_password': trade_password,
         }
+        login_values['_fp'] = new_fp
+        login_values['_switch'] = switch
+        # 换账户前把"当前选中的账户"记下来 → 重连后按身份恢复 ✓
+        login_values['_preferred_identity'] = self.current_account_identity()
         self._login_futures = dict(login_values)
         self._login_saved('futures', login_values)
         self.push(_protocol.patch_login('futures', 'pending',
@@ -3743,11 +4599,8 @@ class Desk:
         # ★ **必须建在主线程**：tqsdk 的 TqApi 只能在创建它的线程里用，
         #   `close()` 还不能在协程里调用（用户实测：登录后数据不更新 +
         #   「不能在协程中调用 close」✗）。这里只登记，真正连接由 tick 执行 ✓
-        self._connect_pending = ('futures', {
-            'username': username, 'password': password, 'real': real,
-            'broker': broker, 'account': account,
-            'trade_password': trade_password,
-        })
+        # ★ 连带指纹 / 切换标记 / 首选账户身份一起交给登录线程 ✓
+        self._connect_pending = ('futures', dict(login_values))
 
     def _on_connect_stocks(self, payload) -> None:
         """连接富途 OpenD 网关（不需要账号，只要网关开着 ✓）"""
@@ -3758,16 +4611,27 @@ class Desk:
         except (TypeError, ValueError):
             self._login_failed('stocks', '网关端口要是数字 ✓')
             return
-        trade = bool(payload.get('trade'))
         trd_env = str(payload.get('trd_env') or 'SIMULATE').upper()
         if trd_env not in ('SIMULATE', 'REAL'):
             trd_env = 'SIMULATE'
+        # ★ 模拟盘**始终**连富途官方模拟账户（不涉及真钱；不勾"启用交易"
+        #   也要读它的持仓 / 权益，否则和富途 App 对不上 ✗ 用户 2026-11-06）
+        trade = bool(payload.get('trade')) or trd_env == 'SIMULATE'
         trd_market = str(payload.get('trd_market') or 'CN').upper()
         if trd_market not in ('CN', 'HK', 'US', 'JP'):
             trd_market = 'CN'
+        # ★ **先落盘**再判断要不要重连：以前"已经连上了"直接 return，
+        #   改了交易环境 / 市场 / 启用交易却没保存（用户 2026-11-06 ✗）
+        self._login_saved('stocks', {
+            'host': host, 'port': port, 'trade': bool(payload.get('trade')),
+            'trd_env': trd_env, 'trd_market': trd_market})
+        self.push(_protocol.patch_login('stocks', 'info',
+                                        saved=self.login_payload('stocks')))
         if self.stocks is not None and self.stocks.available():
             api = getattr(self.stocks, 'api', None)
             same = (bool(getattr(api, '_trade_enabled', False)) == trade
+                    and str(getattr(api, '_trd_env', '') or '').upper()
+                    == trd_env
                     and (not trade or str(getattr(api, 'trd_market', '')
                                           or '').upper() == trd_market))
             if same:
@@ -3788,17 +4652,14 @@ class Desk:
             self.stocks = None
             self.accounts = None
             self.trader = None
-        self._login_saved('stocks', {'host': host, 'port': port,
-                                     'trade': trade, 'trd_env': trd_env,
-                                     'trd_market': trd_market})
         self.push(_protocol.patch_login(
             'stocks', 'pending',
             text=f'正在连接 FutuOpenD {host}:{port}'
                  f'（交易：{trd_env if trade else "关闭"}'
                  f'，市场：{trd_market}）…'))
         self.push_log(f'正在连接 FutuOpenD：{host}:{port}'
-                      f'（trade={trade}, env={trd_env}, market={trd_market}）',
-                      'info')
+                      f'（trade={trade}, env={trd_env}, '
+                      f'market={trd_market}）', 'info')
         # ★ 同样交给主线程（StockApi 的 futu 上下文不是线程安全的 ✓）
         self._connect_pending = ('stocks', {
             'host': host, 'port': port, 'trade': trade,
@@ -4972,6 +5833,14 @@ class Desk:
                 info['indicators'] = []                # 全部移除（所有格 ✓）
                 for index in range(len(cells)):
                     cells[index]['indicators'] = []
+            elif cell <= 0:
+                # ★ 第 1 格（单图就是这一格）：指标存在 `info['indicators']`，
+                #   而 `cells` 往往是**空的**（没存布局）→ 以前 `_drop_cell_indicators`
+                #   直接 return，工具栏「删除全部指标」点了没反应 ✗
+                #   （用户 2026-11-06：加载 uta_macd 模板后删不掉，本地图表正常）
+                info['indicators'] = []
+                if cells:
+                    cells[0] = dict(cells[0], indicators=[])
             else:
                 self._drop_cell_indicators(info, cells, cell, '')
         elif cell > 0:
@@ -4991,12 +5860,21 @@ class Desk:
         # ★ 但**不能连策略线一起清掉**：以前这里推的是裸 `items: []` →
         #   在有策略的格子里删一个指标，主图均线也跟着消失（下一拍策略补丁
         #   又恢复，看起来就是「轮流消失 / 出现」✗，用户 2026-10-30 实测）
-        if key == '*' and payload.get('cell') is None:
-            for index in range(1, len(cells)):
-                # 策略已经一起删了（上面 `_remove_strategy_of`）→ 真的清空 ✓
-                self.push({'type': 'indicator', 'symbol': symbol,
-                           'cell': index, 'items': [], 'strategy': '',
-                           'strategyContracts': []})
+        if key == '*' and (payload.get('cell') is None
+                           or int(payload.get('cell') or 0) <= 0):
+            if payload.get('cell') is None:
+                # 所有格都清了 → 每格都推一次空补丁 ✓
+                for index in range(1, len(cells)):
+                    self.push({'type': 'indicator', 'symbol': symbol,
+                               'cell': index, 'items': [],
+                               'strategy': '', 'strategyContracts': []})
+            else:
+                # 只清第 1 格 → 该格的空补丁（策略线不动 ✓）
+                group, strat_name, contracts = self._cell_strategy_group(
+                    info, 0, symbol)
+                self.push({'type': 'indicator', 'symbol': symbol, 'cell': 0,
+                           'items': list(group), 'strategy': strat_name,
+                           'strategyContracts': contracts})
         elif payload.get('cell') is not None and int(
                 payload.get('cell') or 0) > 0:
             index = int(payload.get('cell') or 0)
@@ -5351,7 +6229,7 @@ class Desk:
         # ★ 回放用的本地模拟持仓线要收起来（实时持仓线上面已经推了 ✓）
         self.push({'type': 'position', 'symbol': symbol})
         self._push_sim_position(symbol, local=True)
-        self.push(self.account_payload(symbol=next(iter(self.tabs), '')))
+        self.push(self._account_patch())
         self.push(self.trading_state(symbol))
         self.push_log('已退出回放，回到实时', 'info')
 
@@ -6207,9 +7085,13 @@ class Desk:
     def _on_local_order(self, payload) -> None:
         payload = payload or {}
         name = str(payload.get('symbol') or '')
+        # ★ 快期四按钮：`offset`（open / close）+ 明确方向 ✓
+        close = (str(payload.get('offset') or '').lower() == 'close'
+                 or bool(payload.get('close')))
+        qty = payload.get('volume') or payload.get('qty') or 0
         result = self.local_sim().order(
-            name, str(payload.get('side') or ''), payload.get('qty') or 0,
-            payload.get('price') or 0, bool(payload.get('close')),
+            name, str(payload.get('side') or ''), qty,
+            payload.get('price') or 0, close,
             auto=bool(payload.get('auto')))
         if not result.get('ok'):
             self.push(_protocol.patch_toast(
@@ -6220,7 +7102,7 @@ class Desk:
         self._push_orders(name, local=True)
         self._push_sim_analysis()
         self.push_log(
-            f"本地下单：{name} {'平仓' if payload.get('close') else '开仓'} "
+            f"本地下单：{name} {'平仓' if close else '开仓'} "
             f"{result['order']['qty']:g} @ {result['order']['price']:g}",
             'success')
 
@@ -7165,8 +8047,11 @@ class Desk:
         持仓 / 挂单每次都查 tqsdk（本地缓存，很便宜），但**节流到 1 秒**，
         避免每 0.5 秒把两三格的账户数据全推一遍。
         """
-        symbols = (info.get('layout') or {}).get('symbols') or []
+        layout_all = info.get('layout') or {}
+        symbols = layout_all.get('symbols') or []
         cycle = int(info.get('cycle') or 60)
+        # ★ 每格自己的周期（没有就回退到页面周期 ✓）
+        cycles = [int(item or 0) for item in (layout_all.get('cycles') or [])]
         now = time.monotonic()
         push_trade = (now - float(getattr(self, '_cell_trade_at', 0.0))) >= 1.0
         if push_trade:
@@ -7177,8 +8062,10 @@ class Desk:
         ind_interval = self._chart_update_interval_ms() / 1000.0
         layout_cells = (info.get('layout') or {}).get('cells') or []
         for index, cell_symbol in enumerate(symbols[1:], start=1):
+            cell_cycle = (cycles[index] if index < len(cycles)
+                          and cycles[index] else cycle)
             feed = pick_feed(self.feeds, cell_symbol) or self.current_feed()
-            frame = feed.klines(cell_symbol, cycle,
+            frame = feed.klines(cell_symbol, cell_cycle,
                             self.tab_length(info)) \
                 if feed is not None else None
             count, first_time, last_time = _kline_signature(frame)
@@ -7727,11 +8614,15 @@ class Desk:
         if not hasattr(self, '_symbol_rows'):
             self._symbol_rows = _index.load() or []
         try:
-            self._index_jobs = _index.batches(self.feeds)
+            # ★ `local_only=True`：只读已下载的合约字典，绝不触发网络查询
+            #   （`query_quotes` 实盘会阻塞 30 秒 → 界面卡几分钟 ✗）
+            self._index_jobs = _index.batches(self.feeds, local_only=True)
         except Exception as error:                               # noqa: BLE001
             self.push_log(f'合约索引准备失败：{error!r}', 'warning')
             return
         self._symbol_building = True
+        # `force=True`（命令 / 搜索触发）= 用户明确要求 → 不等空闲，立刻建 ✓
+        self._index_forced = bool(force)
         self.push_log('开始建立全市场合约索引（后台分批，慢一点但不会卡 ✓）',
                       'info')
 
@@ -7740,6 +8631,25 @@ class Desk:
             return
         """主线程：每次建一小批索引（`tick()` 里调用 ✓）"""
         if not getattr(self, '_symbol_building', False):
+            return
+        # ★ 用户正在操作 / 刚登录 → 先别建（建索引会同步碰 tqsdk，卡的是主线程 ✗）
+        now = time.monotonic()
+        if getattr(self, '_login_busy', False):
+            return
+        if not getattr(self, '_index_forced', False) and                 now - float(getattr(self, '_last_cmd_at', 0.0)) < 8.0:
+            return
+        if now < float(getattr(self, '_index_next_at', 0.0)):
+            return
+        # ★ 没连行情源时**不要**建索引（用户实测：离线也刷「共 5577 个」✗）：
+        #   索引靠 tqsdk 全市场合约字典，没连接时只能拿到本地缓存，
+        #   白跑一遍还占着 tick 的时间；连上以后 `_run_after_connect()` 会再触发 ✓
+        feed = self.current_feed()
+        if feed is None or not feed.available():
+            self._symbol_building = False
+            self._index_jobs = None
+            self.push_log_once(
+                'index-offline',
+                '合约索引：没有连接行情源，先跳过（登录后自动建立 ✓）', 'info')
             return
         job = self._index_jobs
         try:
@@ -7750,6 +8660,7 @@ class Desk:
             _index.save(rows)
             self._symbol_building = False
             self._index_jobs = None
+            self._index_forced = False
             self._symbol_rows = rows
             self.push_log(f'合约索引已更新：共 {len(rows)} 个', 'success')
             self.push({'type': 'symbol_index', 'count': len(rows),
@@ -7760,6 +8671,12 @@ class Desk:
             self._index_jobs = None
             self.push_log(f'合约索引增量更新失败：{error!r}', 'warning')
             return
+        # ★ 单批超过 1 秒 → 说明这一批很重，歇 3 拍再做（把卡顿摊开 ✓）
+        spent = time.monotonic() - now
+        if spent > 1.0:
+            self._index_next_at = time.monotonic() + 1.5
+            self.push_log(f'[性能] 索引·{label} 耗时 {spent:.1f}s，稍后再继续',
+                          'warning')
         before = len(self._symbol_rows or [])
         self._symbol_rows = rows
         added = max(0, len(rows) - before)
@@ -8328,11 +9245,15 @@ class Desk:
                     pump(0.05)
             except Exception:                                # noqa: BLE001
                 pass
+            # ★ 只读**本地合约字典**：`feed.contracts()` 在字典没下载完时会
+            #   `list(SymbolList)` —— tqsdk 内部会一直等查询任务，
+            #   服务器维护时**卡 188 秒**（用户实测 2026-11-04 ✗）
             try:
-                rows = feed.contracts('FUT', exchange) or []
+                reader = getattr(feed, 'contracts_local', None)
+                rows = reader('FUT', exchange) if callable(reader) else []
             except Exception:                                # noqa: BLE001
                 rows = []
-            last = {str(item) for item in rows}
+            last = {str(item) for item in (rows or [])}
             if last or time.monotonic() >= deadline:
                 return last
             time.sleep(0.1)
@@ -8802,6 +9723,18 @@ class Desk:
         new = str(payload.get('to') or '')
         if not new:
             return
+        # ★ 换合约同样先做 1 秒体检（服务器维护时不要在取数里卡几分钟 ✓）
+        if not payload.get('local'):
+            feed = pick_feed(self.feeds, new)
+            if (feed is not None
+                    and getattr(feed, 'available', lambda: False)()
+                    and getattr(feed, 'api', None) is not None):
+                reason = self._preflight(new)
+                if reason:
+                    self.push_log(f'切换合约失败：{reason}', 'error')
+                    self.push(_protocol.patch_toast(reason, 'error',
+                                                    detail=new))
+                    return
         # ★ 多布局：只切某一格（用户实测：以前会把所有格子都换掉 ✗）
         cell_raw = payload.get('cell')
         cell = None
@@ -8847,6 +9780,11 @@ class Desk:
         info.pop('_book_stamp', None)
         if old:
             self.replay_symbols.discard(old)
+            # ★ 单图换标的：账户 key 跟着页签一起搬（旧 key 不该留成孤儿）
+            page_old, page_new = f'chart:{old}', f'chart:{new}'
+            for suffix in ('', '#0'):
+                if f'{page_old}{suffix}' in self._account_keys:
+                    self._account_keys[f'{page_new}{suffix}'] =                         self._account_keys.pop(f'{page_old}{suffix}')
         feed = pick_feed(self.feeds, new) or self.current_feed()
         cycle = int(info.get('cycle') or (86400 if _is_stock(new) else 60))
         info.update({'feed': feed, 'cycle': cycle})
@@ -8872,12 +9810,19 @@ class Desk:
         self._note_kline_state(
             info, bars, len(frame) if frame is not None else 0)
         self.push(_protocol.patch_kline(new, bars, True))
-        self.push(self.book_payload(new, feed))
+        book = self.book_payload(new, feed)
+        book['symbol'] = new
+        book['page'] = f'chart:{new}'
+        self._book_focus[f'chart:{new}'] = new
+        self.push(book)
         self.push(self.position_payload(new, feed))
+        # ★ **单图换标的 → 账户按品种自动切**（用户 2026-11-06 要求 ✓）
+        #   期货 → 快期模拟；股票 → 富途模拟；已经是那个账户就不动 ✓
+        self._auto_account_for_symbol(new)
         # 预警线是全局列表，但前端只画当前合约；切合约后立刻重推一次，
         # 避免旧合约的预警线 / 左侧价格块残留 ✓
         self._on_alerts({'symbol': new})
-        self.push(self.account_payload(symbol=next(iter(self.tabs), '')))
+        self.push(self._account_patch(new))
         self.push(self.indicator_payload(new))
 
     def _on_layout_sync(self, payload=None) -> None:
@@ -8916,19 +9861,35 @@ class Desk:
                 base.pop('strategy_items', None)
             base['symbol'] = symbol
             cells.append(base)
+        given = payload.get('cycles')
+        cycles = []
+        if isinstance(given, (list, tuple)):
+            for item in given:
+                try:
+                    cycles.append(max(1, int(item or 60)))
+                except (TypeError, ValueError):
+                    cycles.append(int(info.get('cycle') or 60))
+        while len(cycles) < len(symbols):
+            cycles.append(int(info.get('cycle') or 60))
         info['layout'] = {'cols': cols, 'rows': rows,
-                          'symbols': symbols, 'cells': cells}
+                          'symbols': symbols, 'cells': cells,
+                          'cycles': cycles[:len(symbols)]}
         self.tabs[tab] = info
         # 第 2..N 格立刻补一次全量 K 线（否则前端会把第 1 格的数据复制过去，
         # 看起来「两个图同一个合约、只有 2 根」✗）
         if len(symbols) <= 1:
             return
         cycle = int(info.get('cycle') or 60)
+        cell_cycles = [int(item or 0) for item
+                       in ((info.get('layout') or {}).get('cycles') or [])]
         for index, symbol in enumerate(symbols[1:], start=1):
             if not symbol:
                 continue
+            cell_cycle = (cell_cycles[index]
+                          if index < len(cell_cycles) and cell_cycles[index]
+                          else cycle)
             feed = pick_feed(self.feeds, symbol) or self.current_feed()
-            frame = (feed.klines(symbol, cycle, self.tab_length(info))
+            frame = (feed.klines(symbol, cell_cycle, self.tab_length(info))
                      if feed is not None else None)
             bars = _protocol.bars_from_frame(frame) if frame is not None else []
             if bars:
@@ -9023,8 +9984,11 @@ class Desk:
                    'items': []})
         # ③ 第 1 格：报价面板 / 账户 / 预警按新合约刷
         if cell == 0:
-            self.push(self.book_payload(new, feed))
-            self.push(self.account_payload(symbol=tab))
+            book = self.book_payload(new, feed)
+            book['symbol'] = new
+            book['page'] = f'chart:{tab}'
+            self.push(book)
+            self.push(self._account_patch(tab))
             self._on_alerts({'symbol': new})
         self.push_log(
             f'切换格 {cell + 1} 合约 → {new} {name}'.strip(), 'info')
@@ -11539,7 +12503,20 @@ class Desk:
         # ★ 前端交易面板发的是 `qty`，以前只读 `volume` → 永远下 1 股/手 ✗
         volume = int(payload.get('volume') or payload.get('qty') or 1)
         price = payload.get('price')
-        # ★ 交易面板的「平仓」按钮带 `close=true`：转成平仓方向（不是反手开仓 ✗）
+        # ★ 快期四按钮：前端直接给 `offset`（open / close）✓
+        offset = str(payload.get('offset') or '').lower()
+        if offset in ('open', 'close'):
+            # 风控先过一道（工作台开了限制时）
+            guard = self._risk_guard(symbol, side, volume,
+                                     float(price) if price else None)
+            if not guard.get('ok'):
+                self.push(_protocol.patch_toast(str(guard.get('text')),
+                                                'warning'))
+                return
+            text = trader.insert(symbol, side, offset, volume, price)
+            self._after_order(text, symbol, side, offset, volume, price)
+            return
+        # ★ 老的「平仓」按钮带 `close=true`：转成平仓方向（不是反手开仓 ✗）
         if payload.get('close'):
             side = 'close'
         guard = self._risk_guard(symbol, side, volume,
@@ -11550,14 +12527,55 @@ class Desk:
             return
         text = trader.place(symbol, side, volume,
                             float(price) if price else None)
+        self._after_order(text, symbol, side, 'open', volume, price)
+
+    def _reset_trade_caches(self) -> None:
+        """换账户：清掉交易侧的所有缓存（TargetPosTask / 拒单回执 ✓）
+
+        ⚠ 不清的话：`TargetPosTask` 还绑着**旧 api**，新账户下单会串到旧连接 ✗
+        """
+        trader = self.trading_view()
+        clear = getattr(trader, 'clear_account_cache', None)
+        if callable(clear):
+            try:
+                clear()
+            except Exception:                                    # noqa: BLE001
+                pass
+    def _poll_order_receipts(self) -> None:
+        """检查刚下的单有没有被**拒单**（保证金不足 / 超过可平手数 ✓）
+
+        tqsdk 的 `insert_order` 是异步的：拒单原因在 `order.last_msg` 里
+        （用户截图 `保证金不足.png`），这里每拍查一次并弹 toast ✓
+        """
+        trader = None
+        try:
+            trader = self.trading_view()
+        except Exception:                                        # noqa: BLE001
+            trader = None
+        poll = getattr(trader, 'poll_orders', None)
+        if callable(poll):
+            try:
+                poll()
+            except Exception as error:                           # noqa: BLE001
+                self.push_log(f'下单回执检查失败：{error!r}', 'warning')
+
+    def _after_order(self, text: str, symbol: str, side: str,
+                     offset: str, volume: int, price=None) -> None:
+        """下单后的统一收尾：日志 / 账本 / 挂单线 / 限价提示 ✓"""
         from .trading import _trade_failed
         ok = not _trade_failed(text)
         self._audit_action('order', text, symbol=symbol, side=side,
                            volume=volume, price=price,
                            status='PENDING' if ok else 'REJECTED')
-        self.push(_protocol.patch_toast(text, 'success' if ok else 'warning'))
-        self.push(self.account_payload(symbol=next(iter(self.tabs), '')))
-        self._push_tab_orders(symbol)        # 挂单线立刻出现 ✓
+        self.push(_protocol.patch_toast(text,
+                                        'success' if ok else 'warning'))
+        if ok and price:
+            # ★ 限价单会**挂着等价格触发**（图上出现挂单 / 平仓线）✓
+            self.push_log(
+                f'限价单已挂：{symbol} {side} {offset} {volume} @ {price}'
+                '（价格到才会成交，图上已画线）', 'info')
+        self.push(self._account_patch())
+        self._push_tab_orders(symbol)        # 挂单 / 平仓线立刻出现 ✓
         try:
             pending = self.pending_orders(symbol)
         except Exception:                                        # noqa: BLE001
@@ -11567,10 +12585,33 @@ class Desk:
                           '（图上会画挂单线）', 'info')
 
     def _on_focus_chart(self, payload=None) -> None:
-        """记住**鼠标最后点击的那张图**的合约（平仓/反手/撤单作用在它上面 ✓）"""
+        """记住**鼠标最后点击的那张图**的合约（平仓/反手/撤单作用在它上面 ✓）
+
+        ★ 二级报价 / 买卖盘也要跟着它走（用户实测 2026-11-03 ✗）：
+          以前只记 `last_symbol`，右侧二级报价面板的数据一直是**格 1 合约**的
+          → 点第 2 格后面板只换了标题、数字还是格 1 的。
+        """
         symbol = str((payload or {}).get('symbol') or '')
-        if symbol:
-            self.last_symbol = symbol
+        if not symbol:
+            return
+        self.last_symbol = symbol
+        page = str((payload or {}).get('page') or '')
+        # ★ 本地图表传的是 CSV 名（`l2609_60`）→ 换成**当前看盘合约**再取盘口，
+        #   否则 `get_quote('l2609_60')` 会订阅一个不存在的合约、卡上百秒 ✗
+        target = self._book_watch_symbol(page, symbol) if page else symbol
+        if not target:
+            return
+        if page:
+            self._book_focus[page] = target
+            self._focus_symbols[page] = symbol
+        data = self.book_payload(
+            target, pick_feed(self.feeds, target) or self.current_feed())
+        data['symbol'] = target
+        if page:
+            data['page'] = page
+        self.push(data)
+        # ★ 多布局：交易账户面板 / 下拉框跟着**这一格**的账户 ✓
+        self._push_cell_account(page, symbol)
 
     def _on_position_action(self, payload) -> None:
         """持仓行右键：平（市价平该合约）/ 反（市价平 + 反向开）/ 全（全平）✓"""
@@ -11585,11 +12626,26 @@ class Desk:
         if trader is None:
             self.push(_protocol.patch_toast('交易未启用', 'warning'))
             return
+        # ★ 锁仓：持仓行右键要按行指定平多 / 平空（用户实测 2026-11-05 ✗）
+        side_row = str(payload.get('side') or '')
+        # ★ 实盘：平 / 反 也要过风控（和下单同一条链路 ✓）
+        if action in ('close', 'reverse'):
+            guard = self._risk_guard(
+                symbol, 'close' if action == 'close' else (side_row or 'close'),
+                volume)
+            if not guard.get('ok'):
+                self.push(_protocol.patch_toast(str(guard.get('text')),
+                                                'warning'))
+                return
         if action == 'close':
-            text = trader.close_symbol(symbol, volume)
+            text = trader.close_symbol(symbol, volume, side_row)
         elif action == 'reverse':
-            text = trader.reverse_symbol(symbol, volume)
+            text = trader.reverse_symbol(symbol, volume, side_row)
         elif action == 'all':
+            # ★ 没带合约（旧前端）→ 用**这一页**的合约，别用首页账户 ✗
+            page = str(payload.get('page') or '')
+            if not symbol and page:
+                symbol = self._page_symbol(page)
             text = trader.action('all', symbol)
         else:
             return
@@ -11598,10 +12654,67 @@ class Desk:
         from .trading import _trade_failed
         ok = not _trade_failed(text)
         self.push(_protocol.patch_toast(text, 'success' if ok else 'warning'))
-        self.push(self.account_payload(symbol=next(iter(self.tabs), '')))
+        self.push(self._account_patch(symbol))
         if symbol:
             self.push(self.position_payload(symbol))
             self._push_orders(symbol)
+            # 这一格的账户面板跟着刷（多布局每格独立 ✓）
+            self._push_cell_account(
+                f'chart:{self._page_of_symbol(symbol)}', symbol)
+
+    def _on_order_modify(self, payload) -> None:
+        """未成委托右键「修改当前委托单」→ **撤旧单 + 按新价/新手数重下** ✓
+
+        快期就是这么做的（交易所没有 modify 指令）。开平 / 方向沿用原委托 ✓
+        """
+        payload = payload or {}
+        symbol = str(payload.get('symbol') or '')
+        order_id = str(payload.get('order_id') or '')
+        trader = self.trading_view()
+        if trader is None:
+            self.push(_protocol.patch_toast('交易未启用', 'warning'))
+            return
+        volume = payload.get('volume')
+        price = payload.get('price')
+        guard = self._risk_guard(
+            symbol, 'modify', int(volume or 0),
+            float(price) if price else None)
+        if not guard.get('ok'):
+            self.push(_protocol.patch_toast(str(guard.get('text')), 'warning'))
+            return
+        text = trader.modify_order(symbol, order_id, volume, price,
+                                   str(payload.get('direction') or ''),
+                                   str(payload.get('offset') or ''))
+        from .trading import _trade_failed
+        ok = not _trade_failed(text)
+        self.push(_protocol.patch_toast(text, 'success' if ok else 'warning'))
+        self.push_log(f'[改单] {text}', 'success' if ok else 'warning')
+        self.push(self._account_patch())
+        if symbol:
+            self._push_orders(symbol)
+        self._push_tab_orders(symbol)
+
+    def _on_order_detail(self, payload) -> None:
+        """改单窗口要的原始信息（合约 / 手数 / 价格 / 方向 / 开平）✓"""
+        payload = payload or {}
+        symbol = str(payload.get('symbol') or '')
+        order_id = str(payload.get('order_id') or '')
+        detail: Dict[str, Any] = dict(payload)
+        trader = self.trading_view()
+        snapshot = {}
+        if trader is not None:
+            try:
+                snapshot = trader.order_snapshot(order_id, symbol) or {}
+            except Exception:                                    # noqa: BLE001
+                snapshot = {}
+        for key, value in (snapshot or {}).items():
+            if value not in (None, '', 0):
+                detail[key] = value
+        detail['type'] = 'order_detail'
+        if symbol:
+            detail['symbol'] = symbol
+        detail['decimals'] = self.decimals_of(str(detail.get('symbol') or ''))
+        self.push(detail)
 
     def _on_order_action(self, payload) -> None:
         """委托行右键：撤（该笔）/ 全（全撤）✓"""
@@ -11624,7 +12737,7 @@ class Desk:
         from .trading import _trade_failed
         ok = not _trade_failed(text)
         self.push(_protocol.patch_toast(text, 'success' if ok else 'warning'))
-        self.push(self.account_payload(symbol=next(iter(self.tabs), '')))
+        self.push(self._account_patch())
         if symbol:
             self._push_orders(symbol)
 
@@ -11645,7 +12758,7 @@ class Desk:
         from .trading import _trade_failed
         ok = not _trade_failed(text)
         self.push(_protocol.patch_toast(text, 'success' if ok else 'warning'))
-        self.push(self.account_payload(symbol=next(iter(self.tabs), '')))
+        self.push(self._account_patch())
         self._push_tab_orders()              # 撤单 / 平仓后挂单线跟着变 ✓
 
     # ======================================================== 扩展功能
@@ -11677,7 +12790,7 @@ class Desk:
             'success' if result.get('ok') else 'warning'))
         self.push(bench.snapshot())
         symbol = str((payload or {}).get('symbol') or '')
-        self.push(self.account_payload(symbol=symbol))
+        self.push(self._account_patch(symbol))
         if symbol:
             self._push_orders(symbol)
 
@@ -12127,7 +13240,7 @@ class Desk:
 
     def _on_account(self, payload) -> None:
         """切回看盘 tab / 刷新按钮 → 立刻推一次账户面板 ✓"""
-        self.push(self.account_payload(symbol=next(iter(self.tabs), '')))
+        self.push(self._account_patch())
 
     def _restart_chart_strategies_for_account(self) -> None:
         """切账户后，图表里的策略要按**新账户**重新绑定/运行 ✓
@@ -12177,6 +13290,16 @@ class Desk:
                     info.pop(key, None)
                 _ = old
 
+    def current_account_identity(self) -> str:
+        """当前账户身份串（换账户时用来保留选择 ✓）"""
+        view = self.account_view()
+        if view is None:
+            return ''
+        try:
+            return str(view.identity_of(view.current()) or '')
+        except Exception:                                        # noqa: BLE001
+            return ''
+
     def _on_switch_account(self, payload) -> None:
         """账户页切换：快期模拟 / 实盘（TqMultiAccount ✓）
 
@@ -12213,13 +13336,147 @@ class Desk:
         self._restart_chart_strategies_for_account()
         # 策略实盘如果正在跑：用同一文件/参数按新账户重启（**所有** ✓）
         self._restart_strategy_live_all()
-        self.push(self.account_payload(symbol=next(iter(self.tabs), '')))
+        self.push(self._account_patch())
 
     def _on_book(self, payload) -> None:
         """前端刚打开 tab / 切回页面 → 立刻推一次二级报价 ✓"""
         symbol = str(payload.get('symbol') or '')
-        if symbol:
-            self.push(self.book_payload(symbol))
+        if not symbol:
+            return
+        page = str(payload.get('page') or '')
+        target = self._book_watch_symbol(page, symbol) if page else symbol
+        if not target:
+            return
+        data = self.book_payload(
+            target, pick_feed(self.feeds, target) or self.current_feed())
+        data['symbol'] = target
+        if page:
+            self._book_focus[page] = target
+            data['page'] = page
+        self.push(data)
+
+    def _on_ui_stall(self, payload) -> None:
+        """前端心跳发现**主线程卡住** → 记一笔（排查界面卡死的唯一线索 ✓）
+
+        前端 `requestAnimationFrame` 的间隔一旦超过 1.5 秒，就说明 JS 主线程
+        被卡住了（WebSocket 堵 / 巨量补丁 / 同步渲染）。这里只记录，不做事 ✓
+        """
+        payload = payload or {}
+        try:
+            span = float(payload.get('ms') or 0.0) / 1000.0
+        except (TypeError, ValueError):
+            return
+        if span < 1.5:
+            return
+        where = str(payload.get('page') or '') or '?'
+        step = getattr(self, '_tick_step', '') or '?'
+        self.push_log(
+            f'[性能] 界面卡顿 {span:.1f}s（页面 {where}；后端最近一步：{step}）',
+            'warning')
+
+    def _on_book_watch(self, payload) -> None:
+        """某格买卖盘 👁 变化 → **按格订阅盘口**（关掉就退订，省订阅数 ✓）
+
+        用户 2026-11-03：买卖盘改成每格常驻功能，只有打开眼睛的格子才需要
+        盘口数据；以前是「整页一个买卖盘 + 只推格 1」→ 多布局看不到、
+        本地图表只有格 1 能显示 ✗
+        """
+        page = str((payload or {}).get('page') or '')
+        if not page:
+            return
+        if (payload or {}).get('clear'):
+            # 页签关掉 → 整页退订 ✓
+            if self._book_watch.pop(page, None) is not None:
+                self._book_at = 0.0
+            return
+        try:
+            cell = max(0, int((payload or {}).get('cell') or 0))
+        except (TypeError, ValueError):
+            return
+        symbol = str((payload or {}).get('symbol') or '').strip()
+        watched = dict(self._book_watch.get(page) or {})
+        cells = (payload or {}).get('cells')
+        if isinstance(cells, (list, tuple)):
+            # ★ 工具栏「买卖盘」= **整页统一开关**：一次给全部格子 ✓
+            if (payload or {}).get('visible'):
+                watched = {str((item or {}).get('cell', index)):
+                           str((item or {}).get('name') or '')
+                           for index, item in enumerate(cells)
+                           if str((item or {}).get('name') or '')}
+            else:
+                watched = {}
+        elif (payload or {}).get('visible') and symbol:
+            watched[str(cell)] = symbol
+        else:
+            watched.pop(str(cell), None)
+        if watched:
+            self._book_watch[page] = watched
+        else:
+            self._book_watch.pop(page, None)
+        # ★ 只把"可以推了"的标记放开，**不要**在命令处理里同步算盘口
+        #   （`book_payload` 会同步碰 tqsdk，多格 × 点击 → 界面直接卡死几分钟 ✗）
+        self._book_at = 0.0
+
+    def _book_watch_symbol(self, page: str, symbol: str) -> str:
+        """本地图表 / 指标页没有真合约 → 用**当前看盘合约**的盘口 ✓"""
+        if re.match(r'^chart:', page):
+            return symbol
+        for key in self.tabs:
+            return str(key)
+        return ''
+
+    def _push_book_watch(self, force: bool = False) -> None:
+        """每格买卖盘：**只推买一 / 卖一**（无分笔）+ 缓存 + 去重 + 限格 ✓
+
+        2026-11-03 用户实测：本地图表多布局点 👁 → 界面卡死几分钟。
+        根因：这里原来对**每个打开的格**同步调 `book_payload()`（含
+        `get_tick_serial` 分笔），tqsdk 是同步阻塞的 → 2 格 × 每拍 = 卡死 ✗。
+        现在：单次最多 2 格（轮转）、500ms 限流、同一合约 1 秒缓存、
+        内容没变就不推 ✓。
+        """
+        if not self._book_watch:
+            return
+        now = time.monotonic()
+        if not force and now - float(getattr(self, '_book_at', 0.0)) < 0.5:
+            return
+        self._book_at = now
+        cache = getattr(self, '_book_cache', None)
+        if cache is None:
+            cache = self._book_cache = {}
+        budget = 2                       # 每拍最多算 2 个合约（轮转 ✓）
+        for page, watched in list(self._book_watch.items()):
+            for cell, symbol in watched.items():
+                if budget <= 0:
+                    return
+                target = self._book_watch_symbol(page, symbol)
+                if not target:
+                    continue
+                cached = cache.get(target)
+                if cached and now - cached[0] < 1.0:
+                    payload = dict(cached[1])
+                else:
+                    # 没有行情源也推（`book_payload` 给空面板 → 前端显示 `--`
+                    # 而不是"买卖盘一直不出现" ✗）
+                    feed = pick_feed(self.feeds, target) or self.current_feed()
+                    payload = self.book_payload(target, feed, ticks=False)
+                    cache[target] = (now, dict(payload))
+                    budget -= 1
+                payload = dict(payload)
+                payload['page'] = page
+                payload['cell'] = int(cell)
+                # 内容没变（买卖一相同）→ 不推，省一次 JS 执行 ✓
+                key = (target, payload.get('bids', [{}])[0].get('price')
+                       if payload.get('bids') else None,
+                       payload.get('asks', [{}])[0].get('price')
+                       if payload.get('asks') else None)
+                seen = getattr(self, '_book_seen', None)
+                if seen is None:
+                    seen = self._book_seen = {}
+                mark = (page, int(cell))
+                if seen.get(mark) == key:
+                    continue
+                seen[mark] = key
+                self.push(payload)
 
     def _on_row_click(self, payload) -> None:
         """左键 → 「合约概览」气泡（当前行数据 + 走势缓存 ✓）"""
@@ -12265,6 +13522,75 @@ class Desk:
                                        payload.get('y') or 0, symbol,
                                        str(payload.get('name') or '')))
 
+    #: 开图前的"行情体检"最长等多久（秒）—— 用户要求"1 秒内测一下" ✓
+    PREFLIGHT_WAIT = 1.0
+
+    def _preflight(self, symbol: str, wait: float = None) -> str:
+        """开图 / 换合约前的**快速体检**：返回错误文案（空串 = 没问题 ✓）
+
+        用户 2026-11-04：天勤服务器维护时点「实时图表」，`open_chart` 卡了
+        **188 秒**、界面直接冻住。这里先花 **1 秒**确认行情到底能不能用：
+
+        1. 行情源在不在（`available()`）；
+        2. 驱动一拍 `pump()`（不阻塞），看这个合约有没有**拿到任何数据**
+           （报价缓存 / 本地合约字典 / K 线表）；
+        3. 拿不到就返回一句人话，调用方**不打开图表**（而不是卡死 ✗）。
+
+        代价：正常情况下一拍就过（报价早就在缓存里了），几乎无感 ✓
+        """
+        feed = pick_feed(self.feeds, symbol)
+        if feed is None:
+            return ''
+        if not getattr(feed, 'available', lambda: True)():
+            return '行情源未连接（先登录期货 / 连接股票）'
+        # ★ 只对**天勤**做体检（有 `wait_update` 才是 tqsdk）：
+        #   离线演示 / 测试桩 / 富途股票都没有这个函数 → 直接放行 ✓
+        if not hasattr(getattr(feed, 'api', None), 'wait_update'):
+            return ''
+        span = self.PREFLIGHT_WAIT if wait is None else max(0.0, float(wait))
+        deadline = time.monotonic() + span
+        while True:
+            try:
+                self.pump(0.05)
+            except Exception:                                    # noqa: BLE001
+                pass
+            if self._has_data(feed, symbol):
+                return ''
+            if time.monotonic() >= deadline:
+                return (f'{symbol} 行情无响应（服务器维护 / 断线？）'
+                        '——稍后重试，先不打开图表')
+            time.sleep(0.05)
+
+    @staticmethod
+    def _has_data(feed, symbol: str) -> bool:
+        """这个合约**现在**能不能拿到数据（全部走缓存，不阻塞 ✓）"""
+        symbol = str(symbol or '')
+        try:
+            local = getattr(feed, 'contracts_local', None)
+            exchange = symbol.split('.')[0].upper()
+            if callable(local) and exchange:
+                rows = local('FUT', exchange) or []
+                if symbol in {str(item) for item in rows}:
+                    return True
+        except Exception:                                        # noqa: BLE001
+            pass
+        if str(getattr(feed, 'kind', '')) == 'stocks':
+            # 富途的 `quotes()` 是同步网络请求（可能等超时）→ 体检时不调 ✓
+            return True
+        try:
+            quotes = feed.quotes([symbol]) or []
+            for item in quotes:
+                for key in ('last', 'last_price', 'bid_price1', 'ask_price1'):
+                    value = item.get(key)
+                    if isinstance(value, (int, float)) and value > 0:
+                        return True
+                # 有任意非空报价字段也算（比如只有昨收）✓
+                if item:
+                    return True
+        except Exception:                                        # noqa: BLE001
+            pass
+        return False
+
     def symbol_issue(self, symbol: str) -> str:
         """开图前的合约体检：返回**问题描述**（空串 = 没问题 ✓）
 
@@ -12297,12 +13623,25 @@ class Desk:
         symbol = str(payload.get('symbol') or '')
         if not symbol:
             return
+        feed = pick_feed(self.feeds, symbol)
+        # ★ 先做 **1 秒行情体检**：服务器维护 / 断线时直接不开图，
+        #   不要让 `get_kline_serial` / 合约查询把主线程卡几分钟 ✓
+        if (feed is not None
+                and getattr(feed, 'available', lambda: False)()
+                and getattr(feed, 'api', None) is not None):
+            reason = self._preflight(symbol)
+            if reason:
+                self.push_log(f'打开图表失败：{reason}', 'error')
+                self.push(_protocol.patch_toast(reason, 'error',
+                                                detail=symbol))
+                self.push_alert('行情不可用', reason, detail=symbol,
+                                level='warning')
+                return
         issue = ''
         try:
             issue = self.symbol_issue(symbol)
         except Exception:                                        # noqa: BLE001
             issue = ''
-        feed = pick_feed(self.feeds, symbol)
         # ★ 一般桌面端开图：合约没在缓存里 → 先强制重取一次合约清单；
         #   仍找不到才提醒并跳过（用户要求：不要第一次误杀合法合约）✓
         if issue and feed is not None and getattr(
@@ -12329,6 +13668,13 @@ class Desk:
         self.push(_protocol.patch_open_tab(symbol,
                                            str(payload.get('name') or ''),
                                            cycle))
+        # ★ 首次打开这一页 → 按**格 1 的合约**自动选账户（用户 2026-11-05 ✓）
+        #   股票 → 富途模拟；期货 → 快期模拟（**即使是实盘也默认快期模拟**）。
+        #   之后用户自己切的账户一律保留（只初始化一次 ✓）
+        page_key = f'chart:{symbol}'
+        cell_key = f'{page_key}#0'
+        if cell_key not in self._account_keys and page_key not in self._account_keys:
+            self._account_keys[cell_key] = 'futu' if _is_stock(symbol) else 'kq'
         # ★ 初始长度 = 设置 → 图表配置 → 期货数据长度（`chart_data_length`）；
         #   指标 / 策略使用同一个 `tab_length`，避免左侧只有指标线、没有 K 线 ✗
         data_length = self.data_length()
@@ -12353,8 +13699,22 @@ class Desk:
                     f'{symbol} 没有 K 线数据（检查行情权限）', 'warning'))
         self.push(self.book_payload(symbol, feed))
         self.push(self.position_payload(symbol, feed))
-        self.push(self.account_payload(symbol=next(iter(self.tabs), '')))
-        self.push(self.trading_state(next(iter(self.tabs), '')))
+        page = f'chart:{symbol}'
+        own = self.account_key_for(f'{page}#0')
+        account = self.account_payload(symbol=symbol, key=own)
+        account['symbol'] = symbol
+        account['page'] = page
+        account['cell'] = 0                    # 格 1（多布局每格独立 ✓）
+        self.push(account)
+        kind = self.account_kind_payload()
+        kind['page'] = page
+        kind['cell'] = 0
+        kind['active'] = own
+        self.push(kind)
+        state = self.trading_state(symbol)
+        state['page'] = page
+        state['cell'] = 0
+        self.push(state)
         self.push(self.indicator_payload(symbol))
         if info.get('chart_type'):
             self.push({'type': 'chart_type', 'symbol': symbol,
@@ -12372,19 +13732,88 @@ class Desk:
         self.tabs.pop(symbol, None)
 
     def _on_set_cycle(self, payload) -> None:
+        """换周期 —— **按格**（多布局每格可以不同周期 ✓）
+
+        用户 2026-11-03：以前工具栏周期只对**格 1** 生效，右键菜单却把
+        **所有格**都换掉 ✗。现在带 `cell`：只换那一格（第 1 格同时更新
+        页面周期 `info['cycle']`，tab 名 / 回放 / 画线键仍以它为准）。
+        """
         symbol = str(payload.get('symbol') or '')
-        cycle = int(payload.get('cycle') or 60)
-        info = self.tabs.get(symbol) or {}
-        feed = info.get('feed') or pick_feed(self.feeds, symbol)
-        info = dict(info)
-        info.update({'feed': feed, 'cycle': cycle})
-        self.tabs[symbol] = info
-        frame = feed.klines(symbol, cycle, self.tab_length(info)) if feed else None
-        bars = _protocol.bars_from_frame(frame)
-        self._reset_kline_state(info)
-        self._note_kline_state(
-            info, bars, len(frame) if frame is not None else 0)
-        self.push(_protocol.patch_kline(symbol, bars, True))
+        try:
+            cycle = max(1, int(payload.get('cycle') or 60))
+        except (TypeError, ValueError):
+            cycle = 60
+        tab = self._resolve_tab_symbol(symbol) or symbol
+        info = dict(self.tabs.get(tab) or {})
+        try:
+            cell = max(0, int(payload.get('cell') or 0))
+        except (TypeError, ValueError):
+            cell = 0
+        feed = (info.get('feed') or pick_feed(self.feeds, tab)
+                or self.current_feed())
+        layout = dict(info.get('layout') or {})
+        symbols = [str(item or '') for item in (layout.get('symbols') or [])]
+        cycles = [int(item or 0) for item in (layout.get('cycles') or [])]
+        while len(cycles) <= cell:
+            cycles.append(0)
+        cycles[cell] = cycle
+        layout['cycles'] = cycles
+        info['layout'] = layout
+        info['feed'] = feed
+        if cell == 0:
+            info['cycle'] = cycle           # 页面主周期 ✓
+        self.tabs[tab] = info
+        # 这一格自己的合约（多布局每格不同）
+        target = tab
+        if cell > 0 and cell < len(symbols) and symbols[cell]:
+            target = symbols[cell]
+        target_feed = pick_feed(self.feeds, target) or feed
+        frame = (target_feed.klines(target, cycle, self.tab_length(info))
+                 if target_feed is not None else None)
+        bars = _protocol.bars_from_frame(frame) if frame is not None else []
+        if cell == 0:
+            self._reset_kline_state(info)
+            self._note_kline_state(
+                info, bars, len(frame) if frame is not None else 0)
+            self.tabs[tab] = info
+            self.push(_protocol.patch_kline(tab, bars, True))
+        else:
+            # 丢掉这一格的指纹 → 下一拍按新周期推全量 ✓
+            state = info.get('_cell_state')
+            if isinstance(state, dict):
+                state.pop(cell, None)
+            self.tabs[tab] = info
+            self.push(dict(_protocol.patch_kline(tab, bars, True), cell=cell))
+
+
+def account_fingerprint(values: Dict[str, Any]) -> tuple:
+    """天勤**账户指纹**：`(天勤用户名, 期货公司, 资金账号)` ✓
+
+    * 天勤用户名（`TqAuth`）决定"模拟账户"身份（`TqKq` 跟随用户名）；
+    * `broker_id + account_id` 决定"实盘账户"身份；
+    * 只登录模拟 → 实盘部分是空串。
+
+    判定规则（用户 2026-11-05 确认）：**任一段不同**就算"换了账户"
+    （例如原来只有模拟、现在加了实盘 → 不同 ✓）。
+    """
+    values = values or {}
+    username = str(values.get('username') or '').strip()
+    if not bool(values.get('real')):
+        return (username, '', '')
+    return (username,
+            str(values.get('broker') or '').strip(),
+            str(values.get('account') or '').strip())
+
+
+def account_fp_label(fp: tuple) -> str:
+    """指纹 → 人话（「模拟 u」/「模拟 u + 实盘 B/A」）✓"""
+    username, broker, code = (list(fp) + ['', '', ''])[:3]
+    if not username:
+        return '未连接'
+    text = f'模拟 {username}'
+    if broker or code:
+        text += f' + 实盘 {broker}/{code}'.rstrip('/')
+    return text
 
 
 def _is_stock(symbol: str) -> bool:
@@ -12541,18 +13970,27 @@ def _tick_side(item, price) -> str:
 
 
 def _position_side(row, volume, price_keys, profit_keys, label) -> Optional[dict]:
+    """一格/一侧持仓 → `{volume, avg, profit, side}` ✓
+
+    ★ 成本价必须和盈亏**自洽**（用户实测 SHFE.ag2612 2026-11-03 ✗）：
+      天勤的 `open_price_*` 是**今仓开仓均价**，`position_price_*` 才是持仓
+      成本（`float_profit_*` 按它算）。以前这里优先 `open_price_*` →
+      持仓线画在 11,780.33、标签却写「亏损 24,195」，而现价 11,748 →
+      用户看着是「明明该盈利」✗。现在走 `accounts.position_cost()`：
+      取 `position_price_*`，并用盈亏反推校验 ✓
+    """
     if not volume:
         return None
-    price = None
-    for key in price_keys:
-        price = _num_local(_field_local(row, key))
-        if price:
-            break
-    profit = None
-    for key in profit_keys:
-        profit = _num_local(_field_local(row, key))
-        if profit is not None:
-            break
+    try:
+        from .accounts import position_cost
+    except Exception:                                            # noqa: BLE001
+        position_cost = None
+    if position_cost is not None:
+        price, profit = position_cost(row, volume, price_keys, profit_keys,
+                                      label)
+    else:                                                        # pragma: no cover
+        price = _num_local(_field_local(row, price_keys[0]))
+        profit = _num_local(_field_local(row, profit_keys[0]))
     return {'volume': float(volume), 'avg': price, 'profit': profit,
             'side': label}
 

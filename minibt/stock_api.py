@@ -520,9 +520,21 @@ class StockApi:
         code = futu_code(symbol)
         quote = self._quotes.get(code)
         if quote is None:
+            # ★ 字段要和天勤的 quote 对齐：二级报价 / 价格框 / 报价页
+            #   都读 `bid_price1` / `ask_price1` / `high` / `low` …
+            #   以前只给了 last_price → 股票二级报价**永远是空的** ✗
+            price = self._last_price(code)
             quote = SimpleNamespace(
-                symbol=code, last_price=self._last_price(code),
-                price_tick=0.01, volume_multiple=1.0,
+                symbol=code, last_price=price,
+                bid_price1=price, ask_price1=price,
+                bid_price2=0.0, ask_price2=0.0,
+                bid_volume1=0.0, ask_volume1=0.0,
+                bid_volume2=0.0, ask_volume2=0.0,
+                open=price, high=price, low=price, close=price,
+                pre_close=price, pre_settlement=price, volume=0.0,
+                amount=0.0, price_tick=0.01, volume_multiple=1.0,
+                upper_limit=price, lower_limit=price,
+                datetime=0,
                 trading_time=SimpleNamespace(
                     day=[list(x) for x in MARKET_SESSIONS.get(
                         code.split('.')[0], MARKET_SESSIONS['SH'])],
@@ -546,10 +558,29 @@ class StockApi:
         if ret != self._RET_OK or snap is None or snap.empty:
             return
         row = snap.iloc[0]
-        try:
-            quote.last_price = float(row.get('last_price') or 0.0)
-        except (TypeError, ValueError):
-            pass
+
+        def number(name: str, default: float = 0.0) -> float:
+            try:
+                return float(row.get(name) or default)
+            except (TypeError, ValueError):
+                return default
+
+        quote.last_price = number('last_price')
+        bid = number('bid_price')
+        ask = number('ask_price')
+        # ★ 盘前 / 停牌时快照可能是 0 → 退回最新价（面板不至于空 ✗）
+        quote.bid_price1 = bid or quote.last_price
+        quote.ask_price1 = ask or quote.last_price
+        quote.bid_volume1 = number('bid_vol')
+        quote.ask_volume1 = number('ask_vol')
+        for name in ('open', 'high', 'low', 'volume'):
+            setattr(quote, name, number(name))
+        quote.close = quote.last_price
+        quote.pre_close = number('prev_close_price') or getattr(
+            quote, 'pre_close', 0.0)
+        if quote.pre_close:
+            quote.pre_settlement = quote.pre_close
+        quote.amount = number('turnover')
         try:
             spread = float(row.get('price_spread') or 0.0)
             if spread > 0:
@@ -597,6 +628,7 @@ class StockApi:
             for column in ('open', 'high', 'low', 'close', 'volume'):
                 frame.loc[index, column] = tail[column].to_numpy(
                     dtype='float64')
+            self._stretch_flat_bar(frame, code)
             if self._fingerprint(frame) != before:
                 self._changed.add((code, period))
                 self._prices[code] = float(frame['close'].iloc[-1])
@@ -618,6 +650,34 @@ class StockApi:
             if now - self._last_equity_at >= 5.0:
                 self._last_equity_at = now
                 self._save_equity()
+
+    def _stretch_flat_bar(self, frame: pd.DataFrame, code: str) -> bool:
+        """把「一字线」的最后一根撑开（**开盘前就打开的图表** ✓）
+
+        用户 2026-11-05：开盘前打开股票 1 小时图，开盘后图上**一直是一字线**
+        （重新打开就正常 ✗）。原因：开盘前富途返回的"当天这根"是
+        ``open = high = low = close = 昨收``，之后的实时 K 线接口如果还没
+        吐出新的一根，这一根就永远是一字 → 图上没有任何波动。
+
+        这里用**最新价**（`_prices`，由报价 / 快照维护）把最后一根的高 / 低 /
+        收撑开：只改数值、不改时间，下一拍真实 K 线到了自然被覆盖 ✓
+        """
+        price = float(self._prices.get(code) or 0.0)
+        if price <= 0 or frame is None or frame.empty:
+            return False
+        try:
+            last = frame.iloc[-1]
+            high = float(last['high'])
+            low = float(last['low'])
+        except (TypeError, ValueError, KeyError):
+            return False
+        if high != low or price == float(last['close']):
+            return False
+        index = frame.index[-1]
+        frame.loc[index, 'close'] = price
+        frame.loc[index, 'high'] = max(price, high)
+        frame.loc[index, 'low'] = min(price, low) if low > 0 else price
+        return True
 
     def wait_update(self, deadline: float = 60, *args, **kwargs) -> bool:
         """轮询刷新（``deadline`` 是最大等待秒数，内部按 ``poll_interval`` 轮询 ✓）"""
@@ -936,7 +996,50 @@ class StockApi:
                      if str(getattr(t, 'trade_id', '')) == str(trade_id)), None)
 
     def get_position_list(self, account=None, *args, **kwargs):
-        """有持仓的合约列表（给「账户总览」计数用 ✓）"""
+        """有持仓的合约列表（**优先富途真实持仓** ✓）
+
+        用户 2026-11-06：desk 的持仓面板要和富途 App 一致 → 有交易上下文时
+        直接 `position_list_query()`，而不是只读本地账本（本地账本只有
+        在 desk 里下过的单 ✗）
+        """
+        if self._trd is not None:
+            try:
+                ret, data = self._trd.position_list_query(**(
+                    {'trd_env': self._trd_env}
+                    if hasattr(self, '_trd_env') else {}))
+                if ret == self._RET_OK and data is not None:
+                    self._sync_positions_from_futu(data)
+                    codes = []
+                    for _i, row in data.iterrows():
+                        code = str(row.get('code') or '')
+                        if code and code not in codes:
+                            codes.append(code)
+                    out = []
+                    for code in codes:
+                        obj = self._position_objs.get(code)
+                        if obj is None:
+                            obj = SimpleNamespace(
+                                symbol=code, instrument_id=code, pos=0,
+                                pos_long=0.0, pos_short=0.0,
+                                float_profit=0.0, position_profit=0.0,
+                                open_price=0.0, open_price_long=0.0,
+                                open_price_short=0.0)
+                            self._position_objs[code] = obj
+                        self._update_position(code, obj)
+                        # 富途给的成本价 / 市值直接盖上去（比本地推算准 ✓）
+                        for _j, row in data[data['code'] == code].iterrows():
+                            cost = float(row.get('cost_price') or 0.0)
+                            if cost:
+                                obj.open_price_long = cost
+                                obj.open_price = cost
+                            obj.float_profit = float(row.get('pl_val') or 0.0)
+                            obj.position_profit = obj.float_profit
+                            break
+                        out.append(obj)
+                    if out:
+                        return out
+            except Exception:                                    # noqa: BLE001
+                pass
         result = []
         for code, book in self._positions.items():
             if not (book.get('long') or book.get('short')):
@@ -982,6 +1085,35 @@ class StockApi:
                 pass
 
     @staticmethod
+    def _ensure_market(self, market: str) -> None:
+        """按市场切换 / 打开富途**交易上下文**（每个市场独立模拟账户 ✓）
+
+        用户 2026-11-06：富途的港股 / 美股 / A 股是三个**独立模拟子账户**
+        → 下单前必须切到对应市场的上下文，不能直接拒单 ✗
+        """
+        market = str(market or '').upper()
+        if not market or market == str(getattr(self, 'trd_market', '') or '').upper():
+            return
+        try:
+            from futu import OpenSecTradeContext, TrdMarket
+        except ImportError:
+            return
+        ctx = getattr(self, '_trd_extra', {}).get(market)
+        if ctx is None:
+            enum = getattr(TrdMarket, market, None)
+            if enum is None:
+                return
+            ctx = OpenSecTradeContext(filter_trdmarket=enum,
+                                      host=self.host, port=self.port,
+                                      security_firm=self._futu.SecurityFirm
+                                      .FUTUSECURITIES)
+            if not hasattr(self, '_trd_extra'):
+                self._trd_extra = {}
+            self._trd_extra[market] = ctx
+        self._trd = ctx
+        self.trd_market = market
+
+    @staticmethod
     def _market_of_code(code: str) -> str:
         head = str(code or '').upper().split('.')[0]
         return {'SH': 'CN', 'SZ': 'CN', 'HK': 'HK', 'US': 'US',
@@ -999,14 +1131,25 @@ class StockApi:
             raise ValueError(
                 f'{symbol} 是期货合约，股票接口不接单（期货请用天勤模拟账号）')
         code = futu_code(symbol)
+        wanted = self._market_of_code(code)
+        # ★ 日本个股 / ETF / REITs：富途**不提供模拟交易**（只有日经期货有）
+        if (self._trd is not None and wanted == 'JP'
+                and str(getattr(self, '_trd_env', '')).upper().endswith(
+                    'SIMULATE')):
+            raise RuntimeError(
+                f'{code} 是日本股票 —— 富途对日股 / ETF / REITs **没有模拟盘**'
+                '（只有日经等日本期货支持模拟）。请改用港股 / 美股 / A 股模拟，'
+                '或连接真实账户')
         if self._trd is not None:
-            wanted = self._market_of_code(code)
             current = str(getattr(self, 'trd_market', '') or '').upper()
             if wanted and current and wanted != current:
-                raise RuntimeError(
-                    f'当前连接的是 {current} 市场交易账户，{code} 属于 '
-                    f'{wanted} 市场；请在登录框切换交易市场后重连 '
-                    '（富途每个市场有独立模拟账户）')
+                # ★ 每个市场有独立模拟账户 → 按市场**惰性切换上下文** ✓
+                try:
+                    self._ensure_market(wanted)
+                except Exception as error:                       # noqa: BLE001
+                    raise RuntimeError(
+                        f'当前连接的是 {current} 市场交易账户，{code} 属于 '
+                        f'{wanted} 市场；切换失败：{error}') from error
         qty = int(volume or 0)
         side = str(direction or '').upper()
         price = float(limit_price) if limit_price else self._last_price(code)

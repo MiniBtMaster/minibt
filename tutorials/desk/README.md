@@ -8,6 +8,17 @@ minibt desk 教程配套示例。文档入口：
 * [13.20 本地图表：参数优化](../../minibt_docs/docs/minibt_desk/manual/13.20_local_chart_optimize.md)
 * [13.21 本地指标样式示例](../../minibt_docs/docs/minibt_desk/manual/13.21_local_chart_indicator_styles.md)
 
+**v1.3.6 建议先读**（账户 / 交易相关全在这里）：
+
+* [13.10 交易账户面板](../../minibt_docs/docs/minibt_desk/manual/13.10_trading.md)
+  —— 快期式四按钮、**全部限价（对手价）**、锁仓拆平今 / 平昨、修改当前委托单、
+  实盘二次确认；三个统一账户（快期模拟 / 富途模拟 / TqAccount）与
+  **账户按页面 / 按格独立**、登录信息持久化；
+* [13.25 二级报价 / 买卖盘](../../minibt_docs/docs/minibt_desk/manual/13.25_watch_book_ticket.md)
+  —— 每格一条买卖盘、工具栏单开关（**默认关闭**）、三条线（持仓线 / 挂单线 / 平仓线）；
+* [13.4 首页](../../minibt_docs/docs/minibt_desk/manual/13.4_home.md)
+  —— 首页账户概览的账户下拉与权益曲线（首页账户只影响首页）。
+
 ## 目录
 
 | 目录 | 内容 |

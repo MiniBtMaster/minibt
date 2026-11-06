@@ -269,7 +269,7 @@ def markets_payload() -> List[Dict[str, str]]:
 
 
 def batches(feeds: Iterable[Any], *, include_options: bool = False,
-            path: Optional[str] = None):
+            path: Optional[str] = None, local_only: bool = False):
     """**逐市场**产出索引（生成器；给主线程每拍建一批，避免卡界面 ✓）
 
     用法::
@@ -278,6 +278,14 @@ def batches(feeds: Iterable[Any], *, include_options: bool = False,
         label, rows = next(job)      # 每次只拉一个市场（几十毫秒）
 
     每批都会 `save()` 一次（中途退出也不白跑 ✓）。
+
+    ⚠ ``local_only=True``：**只读 TqApi 已经下载好的合约字典**
+    （`feed.contracts_local()`），绝不走会阻塞的网络查询 ✓
+
+    用户 2026-11-04 实测：登录天勤后界面反复卡 **158 秒** —— 根因就是这里
+    退回 `feed.contracts()` → `query_quotes` 在实盘里**阻塞到 30 秒超时**，
+    一个 tick 里连撞好几个市场就是两三分钟，整个 Qt 主线程被堵住
+    （连 JS 的 `requestAnimationFrame` 都停了，被误报成"前端卡顿"）✗
     """
     from . import symbols as _symbols
 
@@ -306,7 +314,16 @@ def batches(feeds: Iterable[Any], *, include_options: bool = False,
             exchanges = _symbols.DEFAULT_EXCHANGES.get(kind) or []
             for exchange, label in exchanges:
                 try:
-                    names = futures.contracts(kind, exchange) or []
+                    if local_only:
+                        scanner = getattr(futures, 'contracts_local', None)
+                        names = (scanner(kind, exchange) or []
+                                 if callable(scanner) else [])
+                        # 完全没有本地合约字典（测试桩 / 特殊行情源）→ 才兜底，
+                        # 真实 tqsdk 登录后字典一定有，不会走到这里 ✓
+                        if not names and getattr(futures, 'api', None) is None:
+                            names = futures.contracts(kind, exchange) or []
+                    else:
+                        names = futures.contracts(kind, exchange) or []
                 except Exception:                                # noqa: BLE001
                     names = []
                 for symbol in names:

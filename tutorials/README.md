@@ -18,6 +18,7 @@
 | `vscode/` | `minibt_ide/`（第 12 章） | 编辑器/工具链 12.1–12.5（扩展 / btplot / 九模式 / notebook / 打包）★新增 |
 | `realtime/` | `minibt_realtime/`（第 11 章） | 实时/实盘 11.1–11.9（不联网、不下单）★新增 |
 | `orders/` | `minibt_orders/`（第 10 章） | 订单/止损/仓位/费用/日志/时段/账户 10.1–10.12（共用 `_shared.py`） |
+| [`desk/`](desk/README.md) | `minibt_desk/`（第 13 章） | **minibt desk 教程配套**：本地图表（指标样式 / 回测 / 参数优化）、`Gui.Desk` 入口、指标 Style Zoo；文档 13.9–13.28（交易面板 / 买卖盘 / 布局 / 回放 / 指标和策略 …） |
 | `data/` | `minibt_data/`（第 9 章） | 数据层 9.1–9.12（对象总览 / LocalDatas / KLine / IndFrame / IndSeries / Line / 代理 / 数据源 / resample / 长度 / DataFrame / 多合约）；**`13_futu.ipynb`（富途取数 · Jupyter）、`14_futu_quota.py`（富途额度实测）** ★新增 |
 
 
@@ -58,6 +59,33 @@ python tutorials/styles/01_plotinfo_overview.py
 
 例子默认只依赖**内置数据**（`LocalDatas.test / pp2609_60 / l2609_60`），
 不需要联网、不需要账号、不下单。
+
+## v1.3.6 相关的例子 / 文档（desk 大修）
+
+本版改动几乎都在 **desk**（账户 / 交易 / 登录 / 行情），配套示例与文档：
+
+| 主题 | 例子 / 文档 |
+| --- | --- |
+| 交易账户面板（**快期式四按钮** / 全部限价 / 锁仓拆平今平昨 / 修改委托单 / 实盘二次确认） | [`desk/README.md`](desk/README.md) → [13.10 交易账户面板](../minibt_docs/docs/minibt_desk/manual/13.10_trading.md) |
+| 三个统一账户（快期模拟 / 富途模拟 / TqAccount）、**按页 / 按格独立**、登录持久化 | [13.10 交易账户面板](../minibt_docs/docs/minibt_desk/manual/13.10_trading.md) |
+| 二级报价 / 买卖盘（每格一条、工具栏单开关、默认关闭） | [13.25 二级报价 / 买卖盘](../minibt_docs/docs/minibt_desk/manual/13.25_watch_book_ticket.md) |
+| 首页账户概览（账户下拉、权益曲线） | [13.4 首页](../minibt_docs/docs/minibt_desk/manual/13.4_home.md) |
+| 指标和策略（TradingView 114 个指标卡片库 / 缩略图 / 只读源码） | [13.28 指标和策略](../minibt_docs/docs/minibt_desk/manual/13.28_indicator_strategy_library.md) |
+| 设置（界面缩放 → 个性化 / 外观；挂单线 / 平仓线；图表数据长度） | [13.14 设置](../minibt_docs/docs/minibt_desk/manual/13.14_settings.md) |
+| 本地图表（指标样式 / 回放 / 回测 / 参数优化） | [`desk/local_chart/`](desk/local_chart/README.md) |
+| `Gui.Desk`（btplot / 策略 / 回测 / 优化 / 实时都用 desk 当界面） | [`desk/gui/`](desk/gui/README.md) |
+
+> 交易类示例**都不连账号、不下单**（`realtime/` 章节统一用"不联网、不下单"的写法）；
+> 想接自己的账号请按 [11 章](../minibt_docs/docs/minibt_realtime/index.md) 的
+> `live_trading_modes.py` 写法，账号密码从命令行 / 环境变量取，**不要写进文件**。
+
+## 目录状态（哪些是正式教程、哪些是早期草稿）
+
+| 目录 | 状态 | 说明 |
+| --- | --- | --- |
+| `basic/` | ⚠️ 早期草稿 | 从仓库根目录拷进来的通用示例（`btplot.py` / `live_chart.py` / `stop.py` / `table.py` / `optstrategy.py` / `signal_*` / 策略回放 + 几个 notebook）。**保留作参考**，新内容请放 `styles/` `data/` `orders/` 等正式目录 |
+| `test/` | ⚠️ 内部 | notebook 实验（`indframe*` / `factors` / `finta` …），不作为教程发布 |
+| `styles/` `data/` `orders/` `indicators/` `plots/` `strategies/` `tips/` `realtime/` `vscode/` `desk/` | ✅ 正式 | 每个 `.py` 都有唯一文档编号，见上表 |
 
 ## 文档截图
 

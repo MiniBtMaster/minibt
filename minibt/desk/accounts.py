@@ -35,17 +35,26 @@ LONG_VOLUME = ('pos_long', 'volume_long')
 SHORT_VOLUME = ('pos_short', 'volume_short')
 LONG_TODAY = ('pos_long_today', 'volume_long_today')
 SHORT_TODAY = ('pos_short_today', 'volume_short_today')
-LONG_AVG = ('open_price_long', 'position_price_long')
-SHORT_AVG = ('open_price_short', 'position_price_short')
-LONG_PRICE = ('position_price_long', 'open_price_long')
-SHORT_PRICE = ('position_price_short', 'open_price_short')
+# ★ 天勤里这两个**不是**一回事（用户实测 SHFE.ag2612 2026-11-03 ✗）：
+#   - `open_price_*`    = 今仓开仓均价；
+#   - `position_price_*`= 持仓均价（**真实成本**，`float_profit_*` 就是按它算的）。
+#   以前「持仓均价」先取 `open_price_*` → 显示 11,780.33，而浮动盈亏是
+#   -(24,195)（按 11,210.33 算的）→ 用户看到「成本 11780、现价 11748 却亏 2.4 万」
+#   这种**自相矛盾**的数字 ✗
+LONG_AVG = ('position_price_long', 'open_price_long')
+SHORT_AVG = ('position_price_short', 'open_price_short')
+LONG_PRICE = ('open_price_long', 'position_price_long')
+SHORT_PRICE = ('open_price_short', 'position_price_short')
 LONG_PROFIT = ('float_profit_long', 'position_profit_long')
 SHORT_PROFIT = ('float_profit_short', 'position_profit_short')
 #: 持仓市值 / 占用保证金（期货用 *long* / *short*，股票没有这两个字段 ✓）
 LONG_VALUE = ('market_value_long',)
 SHORT_VALUE = ('market_value_short',)
-LONG_MARGIN = ('margin_long',)
-SHORT_MARGIN = ('margin_short',)
+LONG_MARGIN = ('margin_long', 'margin')
+SHORT_MARGIN = ('margin_short', 'margin')
+#: 合约乘数 / 最新价（持仓市值、盈亏兜底都要用 ✓）
+VOLUME_MULTIPLE = ('volume_multiple',)
+LAST_PRICE = ('last_price',)
 
 POSITION_COLUMNS = ('合约', '买卖', '总仓', '可用', '开仓价', '持仓均价',
                     '浮动盈亏', '持仓市值', '占用保证金')
@@ -56,10 +65,19 @@ TRADE_COLUMNS = ('成交合约', '买卖', '开平', '成交价', '手数', '手
 
 
 def _num(value) -> Optional[float]:
+    """转数字；`None` / 非数字 / **NaN / inf** 都算"没数据" ✓
+
+    天勤持仓里 `market_value_long` 之类字段在期货上常常是 `nan`，
+    以前 `float(nan)` 原样返回 → 表格里直接印出 `nan` ✗（用户实测 ag2612）
+    """
+    import math
     try:
-        return None if value is None else float(value)
+        number = None if value is None else float(value)
     except (TypeError, ValueError):
         return None
+    if number is None or math.isnan(number) or math.isinf(number):
+        return None
+    return number
 
 
 def _field(item, key, default=None):
@@ -74,6 +92,57 @@ def _field_any(item, names, default=None):
         if value is not None:
             return value
     return default
+
+
+def position_cost(item, volume: float, avg_keys, profit_keys,
+                  side: str = '多') -> tuple:
+    """``(持仓均价, 浮动盈亏)`` —— 保证两者**互相自洽** ✓
+
+    用户 2026-11-03（SHFE.ag2612）：表里「持仓均价」显示 11,780.33、
+    浮动盈亏 -24,195，看着"矛盾"；但**快期（券商终端）的持仓表同样显示
+    开仓均价 11,780.3、亏损 -30,495**（当时最新价 12,458：
+    `(11780.3 − 12458) × 15 × 3 ≈ −30,495`）→ 说明券商的成本价就是 11,780.33，
+    **盈亏是对的**，不要拿盈亏去"改写"成本价 ✗（以前试过反推，反而把
+    11,780.33 改成 11,210.33，和快期对不上 ✗）。
+
+    **期货是当日无负债结算**（用户 2026-11-03 说明 ✓）：隔夜持仓每天收盘后
+    按结算价把盈亏划走、成本价重算成结算价 —— 这正是天勤 `position_price_*`
+    的口径。所以：
+
+    1. 成本价取 `position_price_*`（结算后的持仓成本），没有再退 `open_price_*`；
+    2. 盈亏取 `float_profit_*`（按最新价）→ `position_profit_*`；
+    3. 只有**没有**盈亏字段时才用成本价 × 最新价算一个 —— 有就一律**直接引用
+       天勤账户的数据**，desk 不做任何"修正"（拿盈亏反推成本价会和券商对不上 ✗）。
+    """
+    avg = _num(_field_any(item, avg_keys))
+    profit = _num(_field_any(item, profit_keys))
+    mult = _num(_field_any(item, VOLUME_MULTIPLE)) or 0.0
+    last = _num(_field_any(item, LAST_PRICE))
+    short = str(side or '多') == '空'
+    unit = mult * float(volume or 0.0)
+    if profit is None and avg and unit and last:
+        # 没有盈亏字段才自己算（有就以券商 / 天勤给的为准 ✓）
+        profit = ((avg - last) if short else (last - avg)) * unit
+    return avg, profit
+
+
+def position_value(item, volume: float, avg: Optional[float]) -> Optional[float]:
+    """持仓市值：优先 `market_value_*`，没有（期货常给 NaN）就自己算 ✓
+
+    以前直接 `volume × 均价`（期货少了乘数）+ NaN 原样打印 → 表格里一个
+    大大的 `nan` ✗（用户实测 ag2612）
+    """
+    value = _num(_field_any(item, LONG_VALUE + SHORT_VALUE))
+    if value is not None:
+        return value
+    mult = _num(_field_any(item, VOLUME_MULTIPLE))
+    last = _num(_field_any(item, LAST_PRICE))
+    if volume and mult and last:
+        return float(volume) * mult * last
+    price = avg or last
+    if volume and price:
+        return float(volume) * price
+    return None
 
 
 def position_symbol(item) -> str:
@@ -196,26 +265,56 @@ class AccountView:
         self.index = 0
 
     # ------------------------------------------------------------ 账户
-    def api(self, symbol: str = ''):
-        """账户面板用的 api —— 跟着**合约 / 打开的看盘 tab** 走 ✓
+    def api(self, symbol: str = '', key: str = ''):
+        """账户面板用的 api —— 跟着**合约 / 这一页的账户**走 ✓
 
         以前用 `current_feed()`（报价页筛选）→ 报价页停在「股票」时，
         底部面板显示的是**股票账户**，而实际下单可能在天勤（或反过来），
         用户会看到“成交了但没持仓”✗
+
+        ★ 2026-11-05：多布局 / 每页独立账户后，`key` 优先——
+          否则股票格的账户数据会走期货 api（取到模拟账户的 861,741 ✗）
         """
+        # ⚠ **不能**在这里问 `desk.account_key_for()`：
+        #   它会走 `home_key()` → `_verified_account_key()` → `account_view()`
+        #   → `identities()` → `api()` → **无限递归 → 界面卡死 / 账户信息消失** ✗
+        #   需要按页取账户的调用方（`account_payload` / `Trading`）自己把 key 传进来 ✓
+        kind = str(key or '')
+        if not kind:
+            #   ⚠ 直接读字段（不能调 `active_account_key()`：它会再问 catalog，
+            #      catalog 又问 identities → 无限递归 ✗）
+            kind = str(getattr(self.desk, '_account_kind', '') or '')
+        if kind == 'futu':
+            stocks = getattr(self.desk, 'stocks', None)
+            return getattr(stocks, 'api', None) if stocks is not None else None
+        if kind in ('kq', 'real'):
+            futures = getattr(self.desk, 'futures', None)
+            api = getattr(futures, 'api', None) if futures is not None else None
+            return api
         getter = getattr(self.desk, 'feed_of', None)
         feed = getter(symbol) if callable(getter) else self.desk.current_feed()
         return getattr(feed, 'api', None) if feed is not None else None
 
-    def instances(self, symbol: str = '') -> List[Any]:
-        api = self.api(symbol)
+    def _api_of(self, symbol: str = '', key: str = ''):
+        """兼容旧签名：`api(symbol)`（测试 / 扩展会 monkeypatch 单参数 ✓）"""
+        try:
+            return self.api(symbol, key)
+        except TypeError:
+            return self.api(symbol)
+
+    def instances(self, symbol: str = '', key: str = '') -> List[Any]:
+        api = self._api_of(symbol, key)
         account = getattr(api, '_account', None)
         if account is None:
-            return []
+            # 股票（富途）没有 `_account`：把 api 自己当唯一账户 ✓
+            return [api] if api is not None else []
         items = list(getattr(account, '_account_list', None) or [])
         return items or [account]
 
     def labels(self, symbol: str = '') -> List[str]:
+        # ★ 统一账户：当前是「富途模拟」→ 只有一个股票账户 ✓
+        if str(getattr(self.desk, '_account_kind', '') or '') == 'futu':
+            return ['富途模拟']
         labels = []
         for item in self.instances(symbol):
             broker = str(_field(item, 'broker_id', '') or '')
@@ -229,6 +328,37 @@ class AccountView:
                               else name)
         return labels
 
+    @staticmethod
+    def identity_of(item) -> str:
+        """账户身份串：``sim`` / ``real:期货公司:资金账号`` ✓
+
+        重连后 `_account_list` 的**下标可能变**，靠身份才找得回来 ✓
+        """
+        if item is None:
+            return ''
+        broker = str(_field(item, 'broker_id', '') or '')
+        code = str(_field(item, 'account_id', '') or '')
+        if broker or code:
+            return f'real:{broker}:{code}'
+        # ★ 没有期货公司 / 资金账号 = **模拟类账户**（`TqKq` / `TqSim` …）✓
+        return 'sim'
+
+    def identities(self, symbol: str = '', key: str = '') -> List[str]:
+        """每个账户的身份串（和 `labels()` 一一对应 ✓）"""
+        return [self.identity_of(item)
+                for item in self.instances(symbol, key)]
+
+    def index_of(self, identity: str, symbol: str = '') -> int:
+        """按身份找下标（找不到 → 0）✓"""
+        try:
+            return max(0, self.identities(symbol).index(str(identity)))
+        except ValueError:
+            return 0
+
+    def switch_identity(self, identity: str) -> None:
+        """按**身份**切换账户（重连后用 ✓）"""
+        self.switch(self.index_of(identity))
+
     def current(self):
         items = self.instances()
         if not items:
@@ -241,17 +371,59 @@ class AccountView:
         if items:
             self.index = max(0, min(int(index), len(items) - 1))
 
-    def account_kwargs(self, symbol: str = '') -> Dict[str, Any]:
-        """多账户时下游调用都要带 ``account=`` ✓"""
-        items = self.instances(symbol)
-        if len(items) <= 1:
+    def instance_for(self, key: str = '', symbol: str = ''):
+        """按账户 key（``kq`` / ``real`` / ``futu``）取实例 ✓
+
+        用户 2026-11-05：首页 / 每个实时图表页的账户切换要**各自独立**
+        → 读数据不能再靠全局 `self.index`，而是按页面的 key 显式取 ✓
+        """
+        key = str(key or '').lower()
+        items = self.instances(symbol, key)
+        if not items:
+            return None
+        if key in ('kq', 'sim'):
+            for item in items:
+                if not str(_field(item, 'broker_id', '') or ''):
+                    return item
+            return items[0]
+        if key == 'real':
+            for item in items:
+                if str(_field(item, 'broker_id', '') or ''):
+                    return item
+            return items[0]
+        if key == 'futu':
+            return items[0]
+        return self.current()
+
+    def index_for_key(self, key: str = '', symbol: str = '') -> int:
+        """key → 账户下标（给 `index` / `label` 用 ✓）"""
+        target = self.instance_for(key, symbol)
+        try:
+            items = self.instances(symbol, key)
+            if target is not None and target in items:
+                return items.index(target)
+        except Exception:                                        # noqa: BLE001
+            pass
+        return 0
+
+    def account_kwargs(self, symbol: str = '', key: str = '') -> Dict[str, Any]:
+        """多账户时下游调用都要带 ``account=``（按 key 取 ✓）"""
+        items = self.instances(symbol, key)
+        if not items:
             return {}
-        return {'account': self.current()}
+        account = self.instance_for(key, symbol)
+        if len(items) <= 1 and not key:
+            return {}
+        return {'account': account}
 
     # ------------------------------------------------------------ 快照
-    def summary(self, symbol: str = '') -> Dict[str, Any]:
-        api = self.api(symbol)
-        account = self.current()
+    def summary(self, symbol: str = '', key: str = '') -> Dict[str, Any]:
+        # ⚠ `key` 后面会被 `for key, _title, percent in ACCOUNT_FIELDS` 覆盖 →
+        #   先存一份，否则 `payload['key']` 变成最后一个字段名（'risk_ratio' ✗）
+        payload_key = str(key or '')
+        index_hint = 0
+        api = self._api_of(symbol, key)
+        account = self.instance_for(key, symbol)
         if api is None:
             return {}
         try:
@@ -286,12 +458,15 @@ class AccountView:
             values['frozen_commission'] = None
             values['pre_balance'] = values.get('pre_balance')
         labels = self.labels(symbol)
+        index = (self.index_for_key(payload_key, symbol) if payload_key
+                 else int(self.index))
         return {
             'type': 'account',
             'kind': 'stock' if is_stock else 'futures',
-            'index': int(self.index),
+            'index': int(index),
+            'key': payload_key,
             'labels': labels,
-            'label': labels[self.index] if labels else '',
+            'label': labels[index] if labels else '',
             'values': values,
             'fields': [{'key': key, 'title': title, 'percent': percent}
                        for key, title, percent in ACCOUNT_FIELDS],
@@ -308,11 +483,12 @@ class AccountView:
         return 2
 
     # ------------------------------------------------------------ 明细
-    def tables(self, limit: int = 100, symbol: str = '') -> Dict[str, Any]:
-        api = self.api(symbol)
+    def tables(self, limit: int = 100, symbol: str = '',
+               key: str = '') -> Dict[str, Any]:
+        api = self._api_of(symbol, key)
         if api is None:
             return {}
-        kwargs = self.account_kwargs(symbol)
+        kwargs = self.account_kwargs(symbol, key)
         return {
             'positions': self._positions(api, kwargs, limit),
             'orders': self._orders(api, kwargs, limit, alive_only=False),
@@ -337,35 +513,39 @@ class AccountView:
         raw: List[Dict[str, Any]] = []
         for item in items:
             code = position_symbol(item)
+            # 参数顺序：开仓价键（`open_price_*`）、持仓均价键（`position_price_*`）
             for side, volumes, opens, prices, profits, values, margins in (
-                    ('买', LONG_VOLUME, LONG_AVG, LONG_PRICE, LONG_PROFIT,
+                    ('买', LONG_VOLUME, LONG_PRICE, LONG_AVG, LONG_PROFIT,
                      LONG_VALUE, LONG_MARGIN),
-                    ('卖', SHORT_VOLUME, SHORT_AVG, SHORT_PRICE, SHORT_PROFIT,
+                    ('卖', SHORT_VOLUME, SHORT_PRICE, SHORT_AVG, SHORT_PROFIT,
                      SHORT_VALUE, SHORT_MARGIN)):
                 volume = _num(_field_any(item, volumes)) or 0.0
                 if volume <= 0:
                     continue
                 digits = self.decimals_of(code)
-                # 开仓价 / 持仓均价分开取（当日有成交会被摊平，两者不同 ✓）
+                # 开仓价 = 今仓开仓均价；持仓均价 = **真实成本**（和盈亏对齐 ✓）
                 open_price = _num(_field_any(item, opens))
-                avg = _num(_field_any(item, prices)) or open_price
-                value = _num(_field_any(item, values))
+                avg, profit = position_cost(
+                    item, volume, prices, profits,
+                    '空' if side == '卖' else '多')
+                if avg is None:
+                    avg = open_price
+                value = position_value(item, volume, avg)
                 margin = _num(_field_any(item, margins))
                 rows.append([
                     code, side, _int(volume),
                     _int(_field_any(item, LONG_TODAY if side == '买'
                                     else SHORT_TODAY)),
                     _money(open_price, digits), _money(avg, digits),
-                    _money(_field_any(item, profits)),
-                    _money(value if value is not None
-                           else volume * (avg or 0.0)),
+                    _money(profit),
+                    _money(value),
                     _money(margin if margin is not None
                            else _field(item, 'margin')),
                 ])
                 raw.append({'symbol': code,
                             'side': '多' if side == '买' else '空',
                             'volume': int(volume), 'avg': avg,
-                            'profit': _num(_field_any(item, profits))})
+                            'profit': profit})
         return {'columns': list(POSITION_COLUMNS), 'rows': rows[:limit],
                 'raw': raw[:limit],
                 'total': len(rows), 'limit': limit}
@@ -505,9 +685,30 @@ class AccountView:
                 'total': len(rows), 'limit': limit}
 
     # ------------------------------------------------------------ 一起推
-    def payload(self, limit: int = 100, symbol: str = '') -> Dict[str, Any]:
-        payload = self.summary(symbol)
+    def payload(self, limit: int = 100, symbol: str = '',
+                key: str = '') -> Dict[str, Any]:
+        payload = self.summary(symbol, key)
         if not payload:
             return {'type': 'account', 'empty': True}
-        payload['tables'] = self.tables(limit, symbol)
+        payload['tables'] = self.tables(limit, symbol, key)
+        # ★ 实盘标记：持仓行右键「平 / 反 / 全」要弹二次确认（用户要求 ✓）
+        try:
+            payload['real'] = self.is_real(symbol, key)
+        except Exception:                                        # noqa: BLE001
+            payload['real'] = False
         return payload
+
+    def is_real(self, symbol: str = '', key: str = '') -> bool:
+        """这个账户是不是**实盘**（有 broker_id / 股票实盘交易）✓"""
+        try:
+            account = self.instance_for(key, symbol)
+        except Exception:                                        # noqa: BLE001
+            account = None
+        broker = str(_field(account, 'broker_id', '') or '')
+        if broker:
+            return True
+        feed = self._api_of(symbol, key)
+        if not feed or getattr(feed, '_trd', None) is None:
+            return False
+        env = str(getattr(feed, '_trd_env', '') or '').upper()
+        return env.endswith('REAL')

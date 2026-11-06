@@ -34,8 +34,9 @@ def _empty() -> Dict[str, Any]:
 
 #: 登录信息里允许存的字段（期货 / 股票各一套 ✓）
 LOGIN_FIELDS = {
-    'futures': ('username', 'remember', 'real', 'broker', 'account',
-                'trade_password'),
+    # ★ 天勤用户名 / 是否实盘 / 期货公司 / 资金账号 → **总是记住**；
+    #   密码只在勾「记住密码」时存；**交易密码永不保存**（用户 2026-11-05 ✓）
+    'futures': ('username', 'remember', 'real', 'broker', 'account'),
     'stocks': ('host', 'port', 'trade', 'trd_env', 'trd_market'),
 }
 
@@ -51,16 +52,66 @@ def _clean_login(raw: Any) -> Dict[str, Any]:
             continue
         values = {name: block.get(name) for name in fields
                   if block.get(name) not in (None, '')}
-        # 记住密码 → 才把密码写进去（否则永远不落盘 ✓）
+        # 记住密码 → 才把（登录）密码写进去；交易密码**一律不落盘** ✓
         if kind == 'futures' and values.get('remember') and block.get('password'):
             values['password'] = str(block.get('password'))
-        if kind == 'futures' and values.get('remember') and block.get('trade_password'):
-            values['trade_password'] = str(block.get('trade_password'))
-        elif kind == 'futures':
+        if kind == 'futures':
             values.pop('trade_password', None)
+        if kind == 'futures':
+            values.pop('trade_password', None)   # 老文件里残留也丢掉 ✓
         if values:
             out[kind] = values
     return out
+
+
+def login_file() -> str:
+    """登录信息的独立文件（**和偏好文件同目录** ✓）
+
+    用户 2026-11-05：第一次打开 desk 登录框有上次的数据，第二次就没了 ✗
+    → 登录信息以前存在 `desk_user_prefs.json` 的 `login` 里，
+      任何一次"整份重写"（换版本 / 别的设置写入 / 文件损坏回空）
+      都会把它连带清掉。现在**单独存一个文件**，并保留旧位置的迁移 ✓
+    """
+    folder = os.path.dirname(PREFS_FILE)
+    return os.path.join(folder or os.path.expanduser('~'), 'desk_login.json')
+
+
+def _read_login_file() -> Dict[str, Any]:
+    try:
+        with open(login_file(), encoding='utf-8') as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_login_file(data: Dict[str, Any]) -> bool:
+    try:
+        text = json.dumps(_clean_login(data), ensure_ascii=False, indent=2)
+    except (TypeError, ValueError):
+        return False
+    with _LOCK:
+        try:
+            path = login_file()
+            folder = os.path.dirname(path)
+            if folder:
+                os.makedirs(folder, exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as handle:
+                handle.write(text)
+            return True
+        except OSError:
+            return False
+
+
+def login() -> Dict[str, Any]:
+    """记住的登录信息（**独立文件优先**，旧文件里有就迁移过来 ✓）"""
+    values = _clean_login(_read_login_file())
+    if values:
+        return values
+    legacy = _clean_login(load().get('login'))
+    if legacy:
+        _write_login_file(legacy)          # 老版本存在 prefs 里 → 迁过来 ✓
+    return legacy
 
 
 #: 可重入锁（`set_setting` 持锁时还要调 `save()`，用 Lock 会自锁死 ✗）
@@ -275,9 +326,7 @@ def set_watch(payload: Any) -> Dict[str, Any]:
 
 
 # ------------------------------------------------------------------ 登录
-def login() -> Dict[str, Any]:
-    """记住的登录信息（`{'futures': {...}, 'stocks': {...}}` ✓）"""
-    return dict(load().get('login') or {})
+
 
 
 def save_login(kind: str, values: Dict[str, Any]) -> Dict[str, Any]:
@@ -290,11 +339,26 @@ def save_login(kind: str, values: Dict[str, Any]) -> Dict[str, Any]:
             block[name] = values[name]
     if kind == 'futures':
         block['remember'] = bool(values.get('remember'))
-        if block['remember'] and values.get('password'):
-            block['password'] = str(values['password'])
+        if block['remember']:
+            if values.get('password'):
+                block['password'] = str(values['password'])
+            else:
+                # ★ 勾了"记住密码"但这次密码框是空（比如只改了别的字段）→
+                #   **保留上次的密码**，别把已记住的密码弄丢 ✗
+                keep = (_read_login_file().get('futures') or {}).get('password')
+                if keep:
+                    block['password'] = str(keep)
         if not block['remember']:
             block.pop('password', None)
             block.pop('trade_password', None)
+    # ★ 写**独立文件**（不会被"整份重写偏好"连带清掉 ✓）
+    stored = _read_login_file()
+    if block:
+        stored[kind] = block
+    else:
+        stored.pop(kind, None)
+    _write_login_file(stored)
+    # 兼容：prefs 里也留一份（老版本 / 回滚场景能读到 ✓）
     with _LOCK:
         data = load()
         current = dict(data.get('login') or {})
@@ -469,6 +533,11 @@ def toggle_layout_favorite(key: str, on: bool,
 #: 允许的设置项（白名单 —— 别让前端随便塞东西 ✓）
 SETTING_KEYS = {
     'ticket_click_orders', 'ticket_decimals', 'legend_ohlc',
+    # 买卖盘**总开关**（工具栏「买卖盘」一键显示 / 隐藏布局里所有格 ✓）
+    # —— 2026-11-04 去掉逐格 👁 后改成单个布尔
+    'ticket_visible_on',
+    # 旧版逐格记录（保留读取兼容，不再写入 ✓）
+    'ticket_visible',
     'indicator_overlay_filter', 'indicator_section',
     'ticker_only_quoted',
     'watch_default_group',

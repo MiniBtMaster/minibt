@@ -1362,9 +1362,11 @@ def _to_items(key: str, item: dict, result, stamps: List[int], np,
             hist = dict(base)
             hist['kind'] = 'hist'
             hist['base'] = _num_or(style.get('vbar_base'), 0.0)
-            # 没配涨跌色 → 留空，前端按主题的涨/跌色上色（和 miniqt 一致 ✓）
-            hist['upColor'] = _norm_color(style.get('vbar_up_color'))
-            hist['downColor'] = _norm_color(style.get('vbar_down_color'))
+            # 没配涨跌色（或只配了调色板默认的半透明色）→ 留空，
+            # 前端按主题的**K 线涨跌色**上色 ✓
+            # （默认柱体：`vbar_base` 以上上涨色、以下下跌色，base 默认 0）
+            hist['upColor'] = _vbar_color(style.get('vbar_up_color'))
+            hist['downColor'] = _vbar_color(style.get('vbar_down_color'))
             hist['data'] = trimmed
             out.append(hist)
             continue
@@ -1459,6 +1461,46 @@ def _spans_of(plotinfo) -> List[Dict[str, Any]]:
             'lineWidth': max(1, min(4, int(round(width)))),
         })
     return out
+
+
+#: minibt 调色板里的**默认涨 / 跌色**（`minibt.constant.Colors.bull_color` /
+#: `bear_color`）—— alpha 100/255 ≈ 0.39 的**半透明**色。
+#:
+#: 库里几乎所有指标都拿它们当柱体默认色（`pandas_ta.py` 的 macd、
+#: `tradingview.py` 的 MACD / AO / …），结果 desk 的柱体又暗又偏色，看着
+#: 和主图**成交量**一个样 ✗。
+#: 用户 2026-11-03 要求：所有**默认**柱体 → `vbar_base` 以上用 K 线**上涨**色、
+#: 以下用**下跌**色（`vbar_base` 默认 0，用户设了就按用户的），
+#: **除非用户自己指定了颜色**。→ 命中这两个调色板值的**一律当"没设置"**，
+#: 由前端取主题的 K 线涨跌色（不透明、和蜡烛一致 ✓）。
+_PALETTE_DEFAULT_COLORS = {
+    'rgba(39,157,130,100)', 'rgba(39,157,130,0.392)', '#279d82',     # bull
+    'rgba(200,97,100,100)', 'rgba(200,97,100,0.392)', '#c86164',      # bear
+}
+
+
+def is_palette_default_vbar(value) -> bool:
+    """这个颜色是不是**调色板默认的涨 / 跌色**（＝"用户没设置"）✓"""
+    text = _norm_color(value)
+    if not text:
+        return True
+    return str(text).replace(' ', '').lower() in _PALETTE_DEFAULT_COLORS
+
+
+def _vbar_color(value):
+    """柱体涨跌色：调色板**默认色**当作"没设置"（→ 主题 K 线涨跌色 ✓）
+
+    - `None` / 空 → `None`（前端用主题涨跌色）
+    - `Colors.bull_color` / `Colors.bear_color`（半透明默认值）→ `None`
+    - 其它（用户 `vbar_up_color='#ff0000'` / `Colors.red` …）→ 原样返回 ✓
+    """
+    text = _norm_color(value)
+    if not text:
+        return None
+    key = str(text).replace(' ', '').lower()
+    if key in _PALETTE_DEFAULT_COLORS:
+        return None
+    return text
 
 
 def _num_or(value, default: float) -> float:

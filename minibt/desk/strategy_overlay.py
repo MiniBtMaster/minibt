@@ -496,20 +496,23 @@ def _items_for_plot(runner, plot_id: int, frame, fallback_frame):
             # ★ 规范化颜色（0~255 alpha → 0~1），否则半透明的涨跌色会被
             #   Lightweight Charts 夹成实色（“颜色没生效”✗）
             try:
-                from pylightcharts.colors import normalize_color as _nc
+                from .indicator_catalog import _vbar_color
             except Exception:                                    # noqa: BLE001
-                _nc = lambda value: value                        # noqa: E731
+                _vbar_color = lambda value: value                # noqa: E731
             # ★ 策略里的柱体线：颜色在 `vbar_up_color` / `vbar_down_color`
             #   （`up_color/down_color` 只有**实时图表**的
             #   `apply_histogram_colors()` 才会填）→ 本地图表 / 只读叠加走
             #   这里，以前只读 `up_color` → 永远拿不到 → 柱体全是指标线色（橙）✗
             #   （2026-11-02 用户实测：`live_chart.py` 的 macdh 柱子全橙）
-            up = (getattr(spec, 'vbar_up_color', None)
-                  or getattr(spec, 'up_color', None) or color)
-            down = (getattr(spec, 'vbar_down_color', None)
-                    or getattr(spec, 'down_color', None) or color)
-            item['upColor'] = _nc(up)
-            item['downColor'] = _nc(down)
+            # ★ 没配 / 只配了**调色板默认色**（`Colors.bull_color` 那种半透明）
+            #   → 留空，前端用主题的 **K 线涨跌色**（以前退到 `color` → 柱子
+            #   全是指标线色 ✗；退到默认色 → 又暗又偏，像成交量 ✗）
+            up = _vbar_color(getattr(spec, 'vbar_up_color', None)
+                             or getattr(spec, 'up_color', None))
+            down = _vbar_color(getattr(spec, 'vbar_down_color', None)
+                               or getattr(spec, 'down_color', None))
+            item['upColor'] = up
+            item['downColor'] = down
         name_keys[name] = str(item['key'])
         items.append(item)
     # ★ 色带 / 参考线 / 水印（指标链路的 `_to_items` 一直有，策略链路缺 ✗）

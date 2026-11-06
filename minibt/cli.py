@@ -275,6 +275,14 @@ def check(desk, log=print, as_json: bool = False) -> int:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    # ★ Windows 控制台默认 GBK：帮助文案里有 `✓` → 打印时
+    #   `UnicodeEncodeError: 'gbk' codec can't encode` 直接 traceback ✗
+    #   这里把标准输出切成 UTF-8（改不动就算了，不影响功能 ✓）
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding='utf-8', errors='replace')
+        except Exception:                                        # noqa: BLE001
+            pass
     argv = list(sys.argv[1:] if argv is None else argv)
     # ★ 友好兜底：`minibt --check`（漏了 `desk`）也当成 `minibt desk --check` ✓
     if argv and argv[0].startswith('-') and argv[0] not in ('-h', '--help'):

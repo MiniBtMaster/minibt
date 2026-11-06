@@ -3,35 +3,59 @@
 [![Python Version](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyPI version](https://img.shields.io/pypi/v/minibt.svg)](https://pypi.org/project/minibt/)
-[![Version](https://img.shields.io/badge/version-1.3.5-green.svg)](https://github.com/MiniBtMaster/minibt)
+[![Version](https://img.shields.io/badge/version-1.3.6-green.svg)](https://github.com/MiniBtMaster/minibt)
 
 MiniBT 是一个覆盖量化交易**全流程**的 Python 开发库：从指标计算、策略编写、回测分析，到参数优化、K线回放、实盘交易，再到机器学习与强化学习，全部通过一套极简 API 打通。基于 Python 3.12+，MIT 许可证。
 
-## 🆕 v1.3.5 更新亮点
+## 🆕 v1.3.6 更新亮点
 
-- **📉 回测结果页的「回撤」副图可以关**：新增 `config.drawdown_plot`（默认 `False`）
-  → 结果页 = K 线 + 权益 + 盈亏三格，想保留回撤就 `self.config.drawdown_plot = True`；
-- **🎛️ 参数优化页大修**：帕累托前沿 / 参数排名 / 参数重要性不再空白；
-  「按当前目标重新优化」真的按你选的目标 + 权重跑；新增「优化设置」
-  （method / n_jobs / n_trials / sampler / pruner）与**参数网格编辑器**
-  （参数名下拉 + 范围 / 选项 / 固定值，可增删）；
-- **🎯 优化目标不再恒为 0**：`profit` / `result` 等 60 多个 `OPTTargetType`
-  以前根本没算（只有 9 个指标）→ 现在补齐，`values_0` 是真实值；
-- **🌤️ 浅色主题不再有黑块**：回测中 / 参数优化中的等待页、iframe 底色、
-  pylightcharts 导出 HTML 的 `<body>` 都跟着主题走；主图 / 副图分隔线改成
-  很淡的灰；回放时可视 K 线根数恒定、不再整体左漂；
-- **🧩 多合约回测的盈亏副图不再空白**（同一根 K 线多条腿成交 → 重复时间戳 →
-  lightweight-charts 渲染报 `Value is null`，整块 pane 画不出来）；
-- **✏️ 画线更顺手**：工具条到上方工具栏 / 左右间距 0、工具条直角，每个图标悬停
-  显示名称 + 快捷键；回测 / 参数优化页的「画线工具 / 删除画线工具」改成图标；
-- **🧠 编辑器里的 `minibt` 有注释了**：源码运行 / 未安装 minibt 时也能悬停看注释、
-  补全、跳转（jedi 的 sys.path 显式带上仓库根）；设置 → 个性化 → 编辑器还能
-  **手动指定 minibt 路径**（默认关，改完即时生效）；
-- **✅ 加指标提示更准**：只有真的加上图才提示成功；个人指标报错会给出写法提示
-  （`self.ha` 要写 `self.ha()`；`__init__` 里别 return，用 `self.lines.<名字>`）。
+本版是 v1.3.5 之后的一批 **minibt desk** 大修（11-04 ~ 11-06，7 轮用户反馈 +
+2 轮自查），核心是**账户 / 交易 / 登录 / 行情**四条链路：
 
-v1.3.4 的主要更新（多布局稳定化、本地图表多开、Jupyter / Notebook 内嵌、
-指标缺口断线、后台计算）见更新日志。
+- **🏦 账户体系重构**：三个统一账户 **快期模拟 / 富途模拟 / TqAccount**
+  （首页与交易账户页两个下拉框选项一致、未登录置灰）；账户切换改成
+  "先推数据、后推 key"，并用天勤账户列表自愈核对 —— 不再出现
+  「标签是实盘、数值是模拟」或来回跳；
+- **🪟 账户按页面 / 按格独立**：首页切账户只影响首页；每个实时图表页、多布局的
+  每一格都有自己的账户（`chart:SYM#cell`）；本地图表只接本地模拟账户。
+  **首次打开**与**单图换标的**都按品种自动选账户（股票 → 富途模拟，
+  期货 → 快期模拟，即使登录了实盘也默认快期模拟）；
+- **💰 富途模拟 = 富途官方模拟盘**：`trd_env=SIMULATE` 时强制连官方模拟账户，
+  持仓 / 权益 / 委托与富途 App 一致；沪深 / 香港 / 美国是独立模拟子账户，
+  日本个股 / ETF / REITs 没有模拟盘（下单会明确提示）；
+- **📋 交易面板改「快期式」四按钮**：`加多 / 加空 / 平空X / 平多X`（按持仓状态
+  自动切换，锁仓时是 `加多 / 加空 / 平空X / 平多X`）；全部走
+  `TqApi.insert_order` + **限价（对手价）**——上期所 / 中金所 / 能源中心 / 沪深
+  不支持市价单；上期所 / 能源中心按 **平今 / 平昨** 自动拆单；
+- **🖱️ 图上「平仓线 / 挂单线」**：`平 / 平今` 订单橙色、`开` 单绿 / 红；
+  手动挂单前停掉 `TargetPosTask`（机器人会撤掉不认识的挂单 → 以前挂单"一闪就没"）；
+  未成委托右键 **「修改当前委托单…」**（撤旧单 + 按新价重下）；
+- **🔐 登录信息持久化**：用户名 / 记住密码 / 使用实盘 / 期货公司 / 资金账号
+  （股票：网关 / 端口 / 启用交易 / 交易环境 / 交易市场）都记住，存独立文件
+  `~/.minibt/desk_login.json`（边填边存 + 关窗再存 + 点登录先存）；
+  期货公司改成**可输入 + 建议列表**；登录失败一定弹窗并给"下一步"提示；
+  **交易密码永不保存**；
+- **📈 股票行情链路修复**：`pump()` 同时驱动天勤与富途（富途侧 `deadline` 按秒传）
+  —— 以前只看股票时富途 `wait_update()` 从没被调用，K 线 / 报价 / 二级报价全冻住；
+  股票 quote 补齐买一 / 卖一 / 开高低收 / 昨收；开盘前打开的一字线用最新价撑开；
+  午休后不恢复、停更 25 秒的监控也补上；
+- **⚡ 卡顿治理**：定位并修掉「开图 / 换合约卡 158 s / 188 s」三处根因
+  （`get_tick_serial` 走快照、合约索引只读本地、开图前 1 秒预检），并加
+  「界面卡顿心跳」把最慢一步写进运行日志；
+- **🧩 多布局**：周期按格、联动平移防回声、买卖盘每格一条、二级报价与交易面板
+  跟随鼠标最后点击的格；「清仓 / 平仓 / 下单」都按**这一页（这一格）的账户**执行；
+- **👁 买卖盘显隐简化**：默认关闭、每打开一页图表都从「关」开始，只保留工具栏
+  一个全局开关，隐藏时 `display: none`（行高归零）；
+- **🎨 细节**：「回到顶部」圆钮改 CSS 锚定 + SVG（缩放不再被裁切）；
+  界面缩放搬到 个性化 → 外观（默认 100%）；柱体线（vbar）默认跟随 K 线涨跌色；
+  加载指标模板（如 `uta_macd`）后「删除全部指标」可用；
+- **📦 打包**：`minibt 1.3.6` 与 `pylightcharts 0.1.9` 同步发布；
+  `minibt desk --check` / `--help` 在 GBK 控制台不再因 `✓` 抛 `UnicodeEncodeError`。
+
+完整明细见 [`CHANGELOG.md`](CHANGELOG.md) 与
+[`minibt_docs/docs/changelog.md`](../minibt_docs/docs/changelog.md) 的 v1.3.6 段。
+v1.3.5 的主要更新（回撤副图开关、参数优化页大修、优化目标补齐、浅色主题、
+画线工具图标化、编辑器 minibt 注释 …）见更新日志。
 
 ## ✨ 核心优势
 
@@ -100,9 +124,9 @@ if __name__ == "__main__":
 #     Bt().run()
 ```
 
-## 🖥️ minibt desk：一体化行情终端（1.3.5）
+## 🖥️ minibt desk：一体化行情终端（1.3.6）
 
-`minibt.desk` 是随 1.3.4 / 1.3.5 一起完善的桌面行情终端：**报价页 + 多标签看盘页 +
+`minibt.desk` 是随 1.3.4 ~ 1.3.6 一起完善的桌面行情终端：**报价页 + 多标签看盘页 +
 账户 / 交易 / 预警 / 回放 / 本地图表**都在同一个本地进程里，UI 由
 `pylightcharts` 的 JS/TS 页面驱动，Python 只负责数据、策略和交易。
 
@@ -142,7 +166,7 @@ minibt desk --check --json                       # 只体检连接 / 合约数�
 | **本地图表** | 直接加载本地 CSV，挂指标、策略、回测、参数优化；没有行情账号也能完整使用 |
 | **对外集成** | `QtTransport` / `SseTransport` / `RestTransport` / `MockTransport`；`window.Desk.mountDesk(...)` 可嵌进任意网页；`minibt-charts` 在 VS Code 里打开 |
 
-### 近期重点改进（1.3.4 ~ 1.3.5）
+### 近期重点改进（1.3.4 ~ 1.3.6）
 
 - **多布局**：格 2..N 的 K 线 / 指标增量更新（数据变了才推）、持仓线 / 挂单线
   按格路由、换合约只换鼠标最后点击的那一格；加载策略时按合约数**保留多余格**，
@@ -476,7 +500,7 @@ desk 页面嵌进编辑器页签。它和「在编辑器页运行策略图表」
 
 - **在线教程**：[https://www.minibt.cn](https://www.minibt.cn)
 - **更新日志**：[包内 CHANGELOG](CHANGELOG.md) · [官网](https://www.minibt.cn/changelog/)
-- **发布说明**：[1.3.5 RELEASE_NOTES](RELEASE_NOTES.md)
+- **发布说明**：[1.3.6 RELEASE_NOTES](RELEASE_NOTES.md)
 - **GitHub**：[https://github.com/MiniBtMaster/minibt](https://github.com/MiniBtMaster/minibt)
 - **PyPI**：[https://pypi.org/project/minibt/](https://pypi.org/project/minibt/)
 - **作者**: owen | **邮箱**: 407841129@qq.com
@@ -484,3 +508,18 @@ desk 页面嵌进编辑器页签。它和「在编辑器页运行策略图表」
 ## 📄 许可证
 
 本项目采用 [MIT](https://github.com/MiniBtMaster/minibt/blob/main/LICENSE) 许可证。
+
+## 💬 微信交流群
+
+扫码加入 **MiniBT 微信交流群** —— 版本更新、用法答疑、策略与指标交流都在这里：
+
+![MiniBT 微信交流群](https://minibt-img.oss-cn-shenzhen.aliyuncs.com/minibt-group.png)
+
+> 二维码有效期有限，若图片过期 / 群已满，请发邮件到
+> [407841129@qq.com](mailto:407841129@qq.com)（标题：`minibt 加群`），
+> 或提 [GitHub Issue](https://github.com/MiniBtMaster/minibt/issues) 索取新二维码。
+>
+> 提问前建议先看 [常见问题](https://www.minibt.cn/faq/) 与
+> [更新日志](https://www.minibt.cn/changelog/)，并把
+> **版本号（`minibt.__version__`）、系统、报错全文、复现代码**一起发出来，
+> 方便快速定位。

@@ -153,6 +153,17 @@ def _vbar_style(info: dict):
         base = 0.0
     up = info.get('vbar_up_color')
     down = info.get('vbar_down_color')
+    # ★ 调色板**默认色**（`Colors.bull_color='rgba(39,157,130,100)'` 这种
+    #   半透明）当作"没设置"→ 让下面的 `_hist_color_column()` 回退到
+    #   K 线涨跌色（否则柱子又暗又偏，像主图的成交量 ✗，用户 2026-11-03）
+    try:
+        from ..desk.indicator_catalog import is_palette_default_vbar
+    except Exception:                                            # noqa: BLE001
+        is_palette_default_vbar = lambda value: False             # noqa: E731
+    if is_palette_default_vbar(up):
+        up = None
+    if is_palette_default_vbar(down):
+        down = None
     return (normalize_color(up) if up else None,
             normalize_color(down) if down else None, base)
 
@@ -180,9 +191,10 @@ def _hist_color_column(values, info, col: str,
     """
     up, down, base = _vbar_style(info)
     if not (up or down):
-        if 'macdh' not in str(col).lower():
-            return None
-        up, down, base = default_up, default_down, 0.0
+        # ★ 任何柱体线（不只 macdh）默认都按 **K 线涨跌色** 分色：
+        #   `vbar_base` 以上 → 涨色、以下 → 跌色（base 默认 0）✓
+        #   用户 2026-11-03：「所有默认柱体设置」都要这样，除非自己配了颜色。
+        up, down = default_up, default_down
     from pylightcharts.colors import normalize_color
     up = normalize_color(up) if up else (
         normalize_color(default_up) if default_up else None)

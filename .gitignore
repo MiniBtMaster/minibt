@@ -28,6 +28,10 @@ wheelhouse/
 *.pyd
 *.so
 *.dylib
+*.dll
+*.lib
+*.obj
+*.exp
 # cythonize 从 .pyx 生成，不入库
 *.c
 
@@ -61,6 +65,10 @@ minibt/strategy/setting.json
 desk_personal.json
 tv_groups.json
 tv_state.json
+# ★ 登录信息（含**明文密码**！只应存在 ~/.minibt，绝不能被拷进仓库上传）
+desk_login.json
+desk_user_prefs.json
+desk_user_prefs*.json
 minibt/desk/*.log
 *.log
 
@@ -82,7 +90,9 @@ trade_datas*
 minibt/account_info*
 minibt/trade_datas*
 
-# ===== 备份 / 补丁残留 =====
+# ===== 临时文件 / 备份 / 补丁残留 =====
+_tmp_*
+*.tmp
 *.bak
 *.orig
 *.rej
@@ -93,3 +103,4 @@ minibt/trade_datas*
 .idea/
 .DS_Store
 Thumbs.db
+desktop.ini

@@ -19,6 +19,7 @@ class LocalDatas(base):
       私人数据名写进 wheel；它只改索引文件、不删你的数据。
     """
 
+    aliased = DataString("aliased")
     l2609_60 = DataString("l2609_60")
     pp2609_60 = DataString("pp2609_60")
     test = DataString("test")

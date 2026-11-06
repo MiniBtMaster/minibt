@@ -13,7 +13,7 @@ minibt: 一站式量化交易策略开发库
 
 相关资源:
 - 作者: owen
-- 版本信息: v1.3.5
+- 版本信息: v1.3.6
 - 许可证: MIT License
 - GitHub仓库: https://github.com/MiniBtMaster/minibt
 - PyPI仓库: https://pypi.org/project/minibt/
@@ -90,8 +90,8 @@ from .indicators import (
 __author__ = "owen"
 __copyright__ = "Copyright (c) 2025 minibt开发团队"
 __license__ = "MIT"
-__version__ = "1.3.5"
-__version_info__ = (1, 3, 5)
+__version__ = "1.3.6"
+__version_info__ = (1, 3, 6)
 __description__ = "一站式量化交易策略开发库，简化从策略搭建到实盘交易的全流程"
 __url__ = "https://www.minibt.cn"
 __email__ = "407841129@qq.com"

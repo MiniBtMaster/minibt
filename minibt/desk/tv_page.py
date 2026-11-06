@@ -680,6 +680,12 @@ GROUPS_FILE = os.path.join(os.path.expanduser('~'), '.minibt', 'desk',
 #: 用户分组的 key 前缀（`file:<绝对路径>` = 单个脚本 ✓）
 FILE_PREFIX = 'file:'
 
+#: 缩略图**格式版本**：SVG 里带 `<!-- minibt-thumb:N -->` 标记，
+#: 老版本生成的缓存（比如还烘焙着「指标 / 策略」角标的那批）会自动失效、
+#: 重新生成 —— 否则卡片上会出现「旧角标 + 新 HTML 角标」**双重标注** ✗
+#: （用户实测 2026-11-03）
+THUMB_VERSION = 2
+
 _FRAME_CACHE: Dict[str, Any] = {'frame': None}
 #: 每个数据集的 K 线缓存（详情页切数据不用重读 CSV ✓）
 _SYMBOL_CACHE: Dict[str, Any] = {}
@@ -895,7 +901,8 @@ def thumbnail_svg(key: str, theme: str = 'light') -> str:
 
     parts: List[str] = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" '
-        f'height="{height}" viewBox="0 0 {width} {height}">',
+        f'height="{height}" viewBox="0 0 {width} {height}">'
+        f'<!-- minibt-thumb:{THUMB_VERSION} -->',
         f'<rect width="100%" height="100%" fill="{bg}"/>',
     ]
     for ratio in (0.25, 0.5, 0.75):
@@ -1344,6 +1351,16 @@ def _theme_suffix(theme: str = '') -> str:
     return '_dark' if str(theme or '').lower() == 'dark' else ''
 
 
+def _svg_is_current(path: str) -> bool:
+    """缩略图是不是**当前版本**生成的（看 SVG 头部的版本标记 ✓）"""
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as handle:
+            head = handle.read(220)
+    except OSError:
+        return False
+    return f'minibt-thumb:{THUMB_VERSION}' in head
+
+
 def _card_png(key: str, theme: str = '') -> str:
     """用户在图表里截图 → 覆盖卡片封面的 PNG（**按主题各一套** ✓）
 
@@ -1398,7 +1415,11 @@ def _existing_card(key: str, theme: str = 'light') -> str:
         return ''
     suffix = _theme_suffix(theme)
     path = os.path.join(CARD_DIR, f'{safe}{suffix}.svg')
-    return path if os.path.isfile(path) else ''
+    if not os.path.isfile(path):
+        return ''
+    # ★ 老格式（没有版本标记）→ 视为没有：前端会请求 `tv_snapshot`，
+    #   由 `snapshot_path()` 重新生成并覆盖（不会再出现双重角标 ✓）
+    return path if _svg_is_current(path) else ''
 
 
 def snapshot_payload(payload: Optional[dict] = None) -> Dict[str, Any]:
@@ -1442,7 +1463,7 @@ def snapshot_path(key: str, theme: str = 'light') -> str:
         return png
     suffix = '_dark' if str(theme or '').lower() == 'dark' else ''
     path = os.path.join(CARD_DIR, f'{safe}{suffix}.svg')
-    if os.path.isfile(path):
+    if os.path.isfile(path) and _svg_is_current(path):
         return path
     try:
         os.makedirs(CARD_DIR, exist_ok=True)

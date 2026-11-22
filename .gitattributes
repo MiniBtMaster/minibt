@@ -1,0 +1,70 @@
+# ============================================================================
+# minibt —— GitHub 仓库属性（.gitattributes）
+#
+# 结构：仓库根 = 本目录（README / pyproject / setup.py / MANIFEST.in / …）
+#       Python 包 = minibt/（__init__.py / desk / strategy / data / …）
+#       教程 = tutorials/
+#
+# 目标：**checkout 出来的字节在任何系统上都一样**，避免「同一份代码在 Windows
+# 与 Linux 上 diff / 校验结果不同」这类假问题；同时保护数据文件不被改坏。
+#
+# 规则顺序有意义：**后面的覆盖前面的**。
+# ============================================================================
+
+# 默认：按文本处理，仓库里统一 LF（Windows 工作区也是 LF ✓）
+* text=auto eol=lf
+
+# ---------------------------------------------------------------- 源码（文本）
+*.py text eol=lf
+*.pyx text eol=lf
+*.pxd text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.in text eol=lf
+*.txt text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+
+# ------------------------------------------- 数据快照：逐字节，禁止行尾转换
+# `minibt/data/**` 里的 CSV / INI 是**测试与示例直接读的数据**（LocalDatas.test /
+# l2609_60 / pp2609_60 等）。任何 CRLF↔LF 转换都会让"同一份数据"在不同机器上
+# 变得不等，甚至让数值解析出错 ✗ → 这些文件一律 `-text`（原样保存）
+minibt/data/*.csv -text
+minibt/data/*.ini -text
+minibt/data/test/*.csv -text
+
+# -------------------------------------------------- 前端模板（生成物）：逐字节
+# `minibt/strategy/*.js` 由 btplot 生成并被图表直接加载 → 不要做行尾转换
+minibt/strategy/*.js -text
+
+# -------------------------------------------------------------- Windows 脚本
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# ------------------------------------------------------------------ 笔记本
+# .ipynb 是 JSON 大文件：不做行尾规范化、也不生成 diff（避免无意义变更）
+*.ipynb -text -diff
+
+# -------------------------------------------------------------------- 二进制
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.bmp binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.whl binary
+*.pyd binary
+*.so binary
+*.dll binary
+*.exe binary
